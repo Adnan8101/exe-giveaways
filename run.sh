@@ -110,6 +110,24 @@ install_postgresql() {
     print_status "PostgreSQL installed"
 }
 
+# Install cron if not present
+install_cron() {
+    if command -v crontab &> /dev/null; then
+        print_status "Cron is already installed"
+        return 0
+    fi
+
+    print_warning "Cron not found. Installing cron..."
+    
+    $SUDO apt-get update -qq
+    $SUDO apt-get install -y cron
+    
+    $SUDO systemctl enable cron
+    $SUDO systemctl start cron
+    
+    print_status "Cron installed"
+}
+
 # Health check function
 check_service_health() {
     local service_name=$1
@@ -161,20 +179,20 @@ EOF
     print_status "Bot service created"
 }
 
-# Create health check script
+# Create health check script and systemd timer
 create_health_check() {
     print_status "Creating health check monitor..."
     
     cat > "$SCRIPT_DIR/health_check.sh" <<'EOF'
 #!/bin/bash
 
-# Health check script - runs every minute via cron
+# Health check script
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="/var/log/discord-bot-health.log"
 
 log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | sudo tee -a "$LOG_FILE" > /dev/null
 }
 
 # Check Redis
@@ -206,10 +224,33 @@ EOF
 
     chmod +x "$SCRIPT_DIR/health_check.sh"
     
-    # Add to crontab if not already there
-    (crontab -l 2>/dev/null | grep -v health_check.sh; echo "* * * * * $SCRIPT_DIR/health_check.sh") | crontab -
+    # Create systemd timer for health checks (more reliable than cron)
+    $SUDO tee /etc/systemd/system/discord-bot-health.timer > /dev/null <<EOF
+[Unit]
+Description=Discord Bot Health Check Timer
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    $SUDO tee /etc/systemd/system/discord-bot-health.service > /dev/null <<EOF
+[Unit]
+Description=Discord Bot Health Check
+
+[Service]
+Type=oneshot
+ExecStart=$SCRIPT_DIR/health_check.sh
+EOF
+
+    $SUDO systemctl daemon-reload
+    $SUDO systemctl enable discord-bot-health.timer
+    $SUDO systemctl start discord-bot-health.timer
     
-    print_status "Health check monitor installed (runs every minute)"
+    print_status "Health check monitor installed (systemd timer, runs every minute)"
 }
 
 # Main installation flow
@@ -226,6 +267,7 @@ main() {
     install_go
     install_redis
     install_postgresql
+    install_cron
     echo ""
     
     # Build the bot
