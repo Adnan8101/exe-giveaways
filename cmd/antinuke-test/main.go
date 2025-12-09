@@ -19,7 +19,11 @@ func main() {
 	guildID := "YOUR_GUILD_ID_HERE"
 
 	fmt.Println("🔧 Using pre-configured test credentials")
-	fmt.Printf("Token: %s...%s\n", token[:20], token[len(token)-10:])
+	if len(token) > 30 {
+		fmt.Printf("Token: %s...%s\n", token[:20], token[len(token)-10:])
+	} else {
+		fmt.Printf("Token: %s\n", token)
+	}
 	fmt.Printf("Guild ID: %s\n", guildID)
 
 	// Ask for operation counts

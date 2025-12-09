@@ -19,8 +19,6 @@ type Detector struct {
 	session     *discordgo.Session
 
 	// Async action queues (not on hot path)
-	punishmentQueue chan *PunishmentTask
-	revocationQueue chan *RevocationTask
 	loggingQueue    chan *ViolationEvent
 
 	// Object pools for zero-allocation event handling
@@ -61,8 +59,6 @@ func NewDetector(cache *core.AtomicCache, rateLimiter *core.FastRateLimiter, ses
 		cache:           cache,
 		rateLimiter:     rateLimiter,
 		session:         session,
-		punishmentQueue: make(chan *PunishmentTask, 1000),
-		revocationQueue: make(chan *RevocationTask, 1000),
 		loggingQueue:    make(chan *ViolationEvent, 1000),
 	}
 
@@ -75,8 +71,6 @@ func NewDetector(cache *core.AtomicCache, rateLimiter *core.FastRateLimiter, ses
 	}
 
 	// Start background workers
-	go d.punishmentWorker()
-	go d.revocationWorker()
 	go d.loggingWorker()
 
 	return d
@@ -198,48 +192,58 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 		windowSeconds,
 	)
 
-	log.Printf("📊 [DETECTOR] Check: Action=%s, User=%s, Count=%d, Triggered=%v",
-		actionType, executorID, count, triggered)
-
-	// Record detection latency
-	detectionLatency := time.Since(start)
-
 	// If not triggered, we're done (fast path complete)
 	if !triggered {
+		// Log check only if needed (commented out for speed)
+		// log.Printf("📊 [DETECTOR] Check: Action=%s, User=%s, Count=%d, Triggered=%v", actionType, executorID, count, triggered)
 		return
 	}
 
-	// SLOW PATH: Violation detected - queue async actions
-	// This should happen rarely, so performance is less critical
+	// 🚨 CRITICAL PATH: Violation detected
+	// PRIORITY 1: Execute punishment IMMEDIATELY
+	// We spawn this goroutine BEFORE doing anything else (logging, metrics, etc.)
+	go func(guildID, userID, punishment, actionType string) {
+		// Construct task inside goroutine to avoid allocation on critical path
+		task := &PunishmentTask{
+			GuildID:    guildID,
+			UserID:     userID,
+			Punishment: punishment,
+			Reason:     "AntiNuke: Exceeded " + actionType + " limit",
+		}
+		
+		start := time.Now()
+		err := d.executePunishment(task)
+		latency := time.Since(start)
+		
+		if err != nil {
+			log.Printf("⚠️ Punishment failed for %s: %v (took %v)", userID, err, latency)
+		} else {
+			log.Printf("✓ Punished %s: %s (took %v)", userID, punishment, latency)
+		}
+	}(guildID, executorID, punishment, actionType)
 
+	// PRIORITY 2: Execute revocation
+	go func(guildID, actionType, userID, targetID string) {
+		revocation := &RevocationTask{
+			GuildID:    guildID,
+			ActionType: actionType,
+			UserID:     userID,
+			TargetID:   targetID,
+		}
+		
+		start := time.Now()
+		success := d.revokeAction(revocation)
+		latency := time.Since(start)
+		
+		if success {
+			log.Printf("✓ Revoked %s action: %s (took %v)", actionType, targetID, latency)
+		}
+	}(guildID, actionType, executorID, entry.TargetID)
+
+	// PRIORITY 3: Logging and Metrics (Post-Action)
+	detectionLatency := time.Since(start)
 	log.Printf("⚡ AntiNuke triggered: %s by %s in %s (count: %d/%d, latency: %v)",
 		actionType, executorID, guildID, count, limitCount, detectionLatency)
-
-	// Queue punishment (async, not blocking)
-	task := &PunishmentTask{
-		GuildID:    guildID,
-		UserID:     executorID,
-		Punishment: punishment,
-		Reason:     "AntiNuke: Exceeded " + actionType + " limit",
-	}
-	select {
-	case d.punishmentQueue <- task:
-	default:
-		log.Printf("⚠️ Punishment queue full, dropping task for %s", executorID)
-	}
-
-	// Queue revocation (async)
-	revocation := &RevocationTask{
-		GuildID:    guildID,
-		ActionType: actionType,
-		UserID:     executorID,
-		TargetID:   entry.TargetID,
-	}
-	select {
-	case d.revocationQueue <- revocation:
-	default:
-		log.Printf("⚠️ Revocation queue full, dropping task")
-	}
 
 	// Queue logging (async)
 	violation := &ViolationEvent{
@@ -288,19 +292,9 @@ func mapAuditLogAction(actionType discordgo.AuditLogAction) string {
 }
 
 // punishmentWorker processes punishment queue asynchronously
+// Deprecated: Now executed immediately in goroutines
 func (d *Detector) punishmentWorker() {
-	for task := range d.punishmentQueue {
-		start := time.Now()
-
-		err := d.executePunishment(task)
-
-		latency := time.Since(start)
-		if err != nil {
-			log.Printf("⚠️ Punishment failed for %s: %v (took %v)", task.UserID, err, latency)
-		} else {
-			log.Printf("✓ Punished %s: %s (took %v)", task.UserID, task.Punishment, latency)
-		}
-	}
+	// No-op
 }
 
 // executePunishment applies the configured punishment
@@ -334,18 +328,9 @@ func (d *Detector) executePunishment(task *PunishmentTask) error {
 }
 
 // revocationWorker processes revocation queue asynchronously
+// Deprecated: Now executed immediately in goroutines
 func (d *Detector) revocationWorker() {
-	for task := range d.revocationQueue {
-		start := time.Now()
-
-		success := d.revokeAction(task)
-
-		latency := time.Since(start)
-		if success {
-			log.Printf("✓ Revoked %s action: %s (took %v)", task.ActionType, task.TargetID, latency)
-		} else {
-		}
-	}
+	// No-op
 }
 
 // revokeAction attempts to undo an action - AGGRESSIVE MODE

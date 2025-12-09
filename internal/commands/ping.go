@@ -19,6 +19,9 @@ var Ping = &discordgo.ApplicationCommand{
 }
 
 func PingCmd(ctx framework.Context, db *database.Database, rdb *redis.Client) {
+	// Send initial response to make it feel snappy
+	msg, _ := ctx.Reply(utils.EmojiTick + " Pong! Calculating...")
+
 	// Calculate latency from snowflake timestamp
 	var timestamp int64
 	if slashCtx, ok := ctx.(*framework.SlashContext); ok {
@@ -101,7 +104,8 @@ func PingCmd(ctx framework.Context, db *database.Database, rdb *redis.Client) {
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	ctx.ReplyEmbed(embed)
+	// Edit the initial response with the embed
+	ctx.EditReplyEmbed(msg, embed)
 }
 
 func HandlePing(s *discordgo.Session, i *discordgo.InteractionCreate, db *database.Database, rdb *redis.Client) {

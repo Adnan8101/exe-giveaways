@@ -11,10 +11,11 @@ type Context interface {
 	GetAuthor() *discordgo.User
 	GetMember() *discordgo.Member
 	GetArgs() []string
-	Reply(content string) error
+	Reply(content string) (*discordgo.Message, error)
 	ReplyEphemeral(content string) error
-	ReplyEmbed(embed *discordgo.MessageEmbed) error
+	ReplyEmbed(embed *discordgo.MessageEmbed) (*discordgo.Message, error)
 	ReplyComponent(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error
+	EditReplyEmbed(msg *discordgo.Message, embed *discordgo.MessageEmbed) error
 }
 
 // SlashContext implements Context for Slash Commands
@@ -59,13 +60,14 @@ func (c *SlashContext) GetArgs() []string {
 	return c.Args
 }
 
-func (c *SlashContext) Reply(content string) error {
-	return c.Session.InteractionRespond(c.Interaction.Interaction, &discordgo.InteractionResponse{
+func (c *SlashContext) Reply(content string) (*discordgo.Message, error) {
+	err := c.Session.InteractionRespond(c.Interaction.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: content,
 		},
 	})
+	return nil, err
 }
 
 func (c *SlashContext) ReplyEphemeral(content string) error {
@@ -78,13 +80,14 @@ func (c *SlashContext) ReplyEphemeral(content string) error {
 	})
 }
 
-func (c *SlashContext) ReplyEmbed(embed *discordgo.MessageEmbed) error {
-	return c.Session.InteractionRespond(c.Interaction.Interaction, &discordgo.InteractionResponse{
+func (c *SlashContext) ReplyEmbed(embed *discordgo.MessageEmbed) (*discordgo.Message, error) {
+	err := c.Session.InteractionRespond(c.Interaction.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
+	return nil, err
 }
 
 func (c *SlashContext) ReplyComponent(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
@@ -95,6 +98,13 @@ func (c *SlashContext) ReplyComponent(embed *discordgo.MessageEmbed, components 
 			Components: components,
 		},
 	})
+}
+
+func (c *SlashContext) EditReplyEmbed(msg *discordgo.Message, embed *discordgo.MessageEmbed) error {
+	_, err := c.Session.InteractionResponseEdit(c.Interaction.Interaction, &discordgo.WebhookEdit{
+		Embeds: &[]*discordgo.MessageEmbed{embed},
+	})
+	return err
 }
 
 // PrefixContext implements Context for Prefix Commands
@@ -132,9 +142,8 @@ func (c *PrefixContext) GetArgs() []string {
 	return c.Args
 }
 
-func (c *PrefixContext) Reply(content string) error {
-	_, err := c.Session.ChannelMessageSend(c.Message.ChannelID, content)
-	return err
+func (c *PrefixContext) Reply(content string) (*discordgo.Message, error) {
+	return c.Session.ChannelMessageSend(c.Message.ChannelID, content)
 }
 
 func (c *PrefixContext) ReplyEphemeral(content string) error {
@@ -145,9 +154,8 @@ func (c *PrefixContext) ReplyEphemeral(content string) error {
 	return err
 }
 
-func (c *PrefixContext) ReplyEmbed(embed *discordgo.MessageEmbed) error {
-	_, err := c.Session.ChannelMessageSendEmbed(c.Message.ChannelID, embed)
-	return err
+func (c *PrefixContext) ReplyEmbed(embed *discordgo.MessageEmbed) (*discordgo.Message, error) {
+	return c.Session.ChannelMessageSendEmbed(c.Message.ChannelID, embed)
 }
 
 func (c *PrefixContext) ReplyComponent(embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
@@ -156,5 +164,13 @@ func (c *PrefixContext) ReplyComponent(embed *discordgo.MessageEmbed, components
 		Components: components,
 	}
 	_, err := c.Session.ChannelMessageSendComplex(c.Message.ChannelID, msg)
+	return err
+}
+
+func (c *PrefixContext) EditReplyEmbed(msg *discordgo.Message, embed *discordgo.MessageEmbed) error {
+	if msg == nil {
+		return nil // Should not happen for PrefixContext unless Reply failed
+	}
+	_, err := c.Session.ChannelMessageEditEmbed(c.Message.ChannelID, msg.ID, embed)
 	return err
 }
