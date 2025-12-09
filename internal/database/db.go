@@ -219,6 +219,61 @@ CREATE TABLE IF NOT EXISTS redeem_codes (
     FOREIGN KEY (item_id) REFERENCES shop_items(id) ON DELETE CASCADE
 );
 
+-- AntiNuke Config table
+CREATE TABLE IF NOT EXISTS antinuke_config (
+    guild_id TEXT PRIMARY KEY,
+    enabled BOOLEAN DEFAULT FALSE,
+    logs_channel TEXT DEFAULT '',
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
+);
+
+-- AntiNuke Actions table
+CREATE TABLE IF NOT EXISTS antinuke_actions (
+    id SERIAL PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    action_type TEXT NOT NULL, -- 'ban_members', 'kick_members', 'delete_roles', etc.
+    enabled BOOLEAN DEFAULT TRUE,
+    limit_count INTEGER DEFAULT 3,
+    window_seconds INTEGER DEFAULT 10,
+    punishment TEXT DEFAULT 'ban', -- 'ban', 'kick', 'timeout', 'quarantine'
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    UNIQUE(guild_id, action_type)
+);
+
+-- AntiNuke Whitelist table
+CREATE TABLE IF NOT EXISTS antinuke_whitelist (
+    id SERIAL PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    target_id TEXT NOT NULL, -- User ID or Role ID
+    target_type TEXT NOT NULL, -- 'user' or 'role'
+    added_by TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    UNIQUE(guild_id, target_id)
+);
+
+-- AntiNuke Events table (for rate limiting tracking)
+CREATE TABLE IF NOT EXISTS antinuke_events (
+    id SERIAL PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    executor_id TEXT NOT NULL,
+    target_id TEXT, -- Channel ID, Role ID, User ID, etc.
+    timestamp BIGINT NOT NULL,
+    revoked BOOLEAN DEFAULT FALSE
+);
+
+-- Create indexes for antinuke
+CREATE INDEX IF NOT EXISTS idx_antinuke_config_guild ON antinuke_config(guild_id);
+CREATE INDEX IF NOT EXISTS idx_antinuke_actions_guild ON antinuke_actions(guild_id);
+CREATE INDEX IF NOT EXISTS idx_antinuke_actions_guild_action ON antinuke_actions(guild_id, action_type);
+CREATE INDEX IF NOT EXISTS idx_antinuke_whitelist_guild ON antinuke_whitelist(guild_id);
+CREATE INDEX IF NOT EXISTS idx_antinuke_whitelist_target ON antinuke_whitelist(guild_id, target_id);
+CREATE INDEX IF NOT EXISTS idx_antinuke_events_guild_action ON antinuke_events(guild_id, action_type);
+CREATE INDEX IF NOT EXISTS idx_antinuke_events_timestamp ON antinuke_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_antinuke_events_guild_executor_time ON antinuke_events(guild_id, executor_id, action_type, timestamp);
+
 `
 
 func NewDatabase(cfg PostgresConfig) (*Database, error) {
@@ -290,24 +345,6 @@ func (d *Database) Close() error {
 }
 
 func (d *Database) Ping() error {
-	// Check cache first (10-second TTL for ultra-low latency)
-	d.pingCacheMutex.RLock()
-	if time.Since(d.lastPingTime) < 10*time.Second {
-		err := d.lastPingError
-		d.pingCacheMutex.RUnlock()
-		return err
-	}
-	d.pingCacheMutex.RUnlock()
-
-	// Cache miss or expired - do actual ping
-	d.pingCacheMutex.Lock()
-	defer d.pingCacheMutex.Unlock()
-
-	// Double-check after acquiring write lock
-	if time.Since(d.lastPingTime) < 10*time.Second {
-		return d.lastPingError
-	}
-
 	// Use prepared statement for fastest possible ping
 	var err error
 	if d.PreparedPingStmt != nil {
@@ -316,10 +353,6 @@ func (d *Database) Ping() error {
 	} else {
 		err = d.db.Ping()
 	}
-
-	// Update cache
-	d.lastPingTime = time.Now()
-	d.lastPingError = err
 	return err
 }
 
@@ -570,6 +603,17 @@ func (d *Database) AddVoiceMinutes(guildID, userID string, minutes int) error {
 		DO UPDATE SET voice_minutes = user_stats.voice_minutes + $4
 	`
 	_, err := d.db.Exec(query, guildID, userID, minutes, minutes)
+	return err
+}
+
+func (d *Database) AddMessageCount(guildID, userID string, amount int) error {
+	query := `
+		INSERT INTO user_stats (guild_id, user_id, message_count, voice_minutes)
+		VALUES ($1, $2, $3, 0)
+		ON CONFLICT(guild_id, user_id)
+		DO UPDATE SET message_count = user_stats.message_count + $3
+	`
+	_, err := d.db.Exec(query, guildID, userID, amount)
 	return err
 }
 

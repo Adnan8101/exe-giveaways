@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"discord-giveaway-bot/internal/commands"
+	"discord-giveaway-bot/internal/commands/antinuke"
 	"discord-giveaway-bot/internal/commands/economy"
 	"discord-giveaway-bot/internal/commands/framework"
 	"discord-giveaway-bot/internal/commands/voice"
@@ -30,6 +31,23 @@ func (b *Bot) Ready(s *discordgo.Session, r *discordgo.Ready) {
 		} else {
 			log.Printf("Registered commands for guild %s", guild.ID)
 		}
+	}
+}
+
+func (b *Bot) GuildCreate(s *discordgo.Session, g *discordgo.GuildCreate) {
+	log.Printf("Guild joined/loaded: %s (%s). Starting command registration...", g.Name, g.ID)
+
+	// Warm AntiNuke cache for this guild
+	if b.AntiNukeV2 != nil {
+		b.AntiNukeV2.WarmCache(g.ID)
+	}
+
+	// Register main bot commands
+	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, g.ID, commands.Commands)
+	if err != nil {
+		log.Printf("Failed to register commands for guild %s: %v", g.ID, err)
+	} else {
+		log.Printf("Registered giveaway commands for guild %s", g.Name)
 	}
 }
 
@@ -75,6 +93,9 @@ func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			commands.HandlePing(s, i, b.DB, b.Redis)
 		case "stats":
 			commands.HandleStats(s, i, b.StartTime)
+		// AntiNuke Commands
+		case "panic_mode":
+			antinuke.HandlePanicMode(s, i, b.DB)
 		// Voice Commands
 		case "wv":
 			voice.WhereVoiceHandler(s, i)
@@ -121,6 +142,17 @@ func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			b.AdminShopCommands.CheckRedeem(s, i)
 		case "redeem-claimed":
 			b.AdminShopCommands.RedeemClaimed(s, i)
+		// AntiNuke Commands
+		case "antinuke":
+			antinuke.HandleAntiNuke(s, i, b.DB, b.AntiNukeV2)
+		case "setlimit":
+			antinuke.HandleSetLimit(s, i, b.DB)
+		case "punishment":
+			antinuke.HandlePunishment(s, i, b.DB)
+		case "whitelist":
+			antinuke.HandleWhitelist(s, i, b.DB)
+		case "logs":
+			antinuke.HandleLogs(s, i, b.DB)
 		}
 
 	case discordgo.InteractionMessageComponent:
@@ -167,6 +199,8 @@ func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			b.AdminShopCommands.HandleEditRoleSelect(s, i)
 		} else if customID == "help_category_select" {
 			commands.HandleHelpSelect(s, i)
+		} else if strings.HasPrefix(customID, "whitelist_add_select_") {
+			antinuke.HandleWhitelistSelect(s, i, b.DB)
 		}
 
 	case discordgo.InteractionModalSubmit:

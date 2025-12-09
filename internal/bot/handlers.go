@@ -7,7 +7,7 @@ import (
 )
 
 func (b *Bot) HandleGCreate(i *discordgo.InteractionCreate) {
-	commands.HandleGCreate(b.Session, i, b.DB)
+	commands.HandleGCreate(b.Session, i, b.Service)
 }
 
 func (b *Bot) HandleGEnd(i *discordgo.InteractionCreate) {
@@ -19,7 +19,7 @@ func (b *Bot) HandleGReroll(i *discordgo.InteractionCreate) {
 }
 
 func (b *Bot) HandleGList(i *discordgo.InteractionCreate) {
-	commands.HandleGList(b.Session, i, b.DB)
+	commands.HandleGList(b.Session, i, b.Service)
 }
 
 func (b *Bot) HandleGCancel(i *discordgo.InteractionCreate) {

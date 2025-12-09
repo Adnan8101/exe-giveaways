@@ -3,6 +3,7 @@ package services
 import (
 	"discord-giveaway-bot/internal/database"
 	"discord-giveaway-bot/internal/models"
+	"discord-giveaway-bot/internal/redis"
 	"discord-giveaway-bot/internal/utils"
 	"fmt"
 	"log"
@@ -18,13 +19,15 @@ import (
 type GiveawayService struct {
 	Session        *discordgo.Session
 	DB             *database.Database
+	Redis          *redis.Client
 	EconomyService *EconomyService
 }
 
-func NewGiveawayService(s *discordgo.Session, db *database.Database, economyService *EconomyService) *GiveawayService {
+func NewGiveawayService(s *discordgo.Session, db *database.Database, rdb *redis.Client, economyService *EconomyService) *GiveawayService {
 	return &GiveawayService{
 		Session:        s,
 		DB:             db,
+		Redis:          rdb,
 		EconomyService: economyService,
 	}
 }
@@ -45,6 +48,9 @@ func (s *GiveawayService) EndGiveaway(messageID string) error {
 		log.Printf("Error marking giveaway as ended: %v", err)
 		return err
 	}
+
+	// Invalidate cache
+	s.Redis.InvalidateActiveGiveaways(g.GuildID)
 
 	// Get participants
 	participants, err := s.DB.GetParticipants(g.ID)
@@ -230,4 +236,36 @@ func (s *GiveawayService) UpdateGiveawayMessage(g *models.Giveaway) {
 	count, _ := s.DB.GetParticipantCount(g.ID)
 	embed := utils.GiveawayEmbed(g, count)
 	s.Session.ChannelMessageEditEmbed(g.ChannelID, g.MessageID, embed)
+}
+
+func (s *GiveawayService) GetActiveGiveaways(guildID string) ([]*models.Giveaway, error) {
+	// Try Redis first
+	if giveaways, ok := s.Redis.GetActiveGiveaways(guildID); ok {
+		return giveaways, nil
+	}
+
+	// Fallback to DB
+	giveaways, err := s.DB.GetActiveGiveaways(guildID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache result
+	_ = s.Redis.SetActiveGiveaways(guildID, giveaways)
+
+	return giveaways, nil
+}
+
+func (s *GiveawayService) SyncGiveawayQueue() error {
+	giveaways, err := s.DB.GetAllActiveGiveaways()
+	if err != nil {
+		return err
+	}
+
+	for _, g := range giveaways {
+		if err := s.Redis.AddToEndingQueue(g.MessageID, g.EndTime); err != nil {
+			log.Printf("Failed to add giveaway %s to ending queue: %v", g.MessageID, err)
+		}
+	}
+	return nil
 }

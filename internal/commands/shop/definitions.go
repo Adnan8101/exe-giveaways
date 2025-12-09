@@ -55,116 +55,92 @@ var (
 	}
 
 	// Admin Commands
-	CreateItem = &discordgo.ApplicationCommand{
-		Name:        "create-item",
-		Description: "Create a new shop item (Admin)",
+	AdminShop = &discordgo.ApplicationCommand{
+		Name:        "admin-shop",
+		Description: "Manage shop items (Admin)",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "name",
-				Description: "Name of the new item",
-				Required:    false,
-			},
-		},
-	}
-
-	EditItem = &discordgo.ApplicationCommand{
-		Name:        "edit-item",
-		Description: "Edit a shop item (Admin)",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "item",
-				Description: "Name of the item to edit (Optional - skip to jump to item)",
-				Required:    false,
-			},
-		},
-	}
-
-	DeleteItem = &discordgo.ApplicationCommand{
-		Name:        "delete-item",
-		Description: "Delete a shop item (Admin)",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "item",
-				Description: "Name of the item to delete",
-				Required:    true,
-			},
-		},
-	}
-
-	GiveItem = &discordgo.ApplicationCommand{
-		Name:        "give-item",
-		Description: "Give an item to a user (Admin)",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionUser,
-				Name:        "user",
-				Description: "User to give item to",
-				Required:    true,
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "create",
+				Description: "Create a new shop item",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "name",
+						Description: "Name of the new item",
+						Required:    false,
+					},
+				},
 			},
 			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "item",
-				Description: "Name of the item",
-				Required:    true,
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "edit",
+				Description: "Edit a shop item",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "item",
+						Description: "Name of the item to edit",
+						Required:    false,
+					},
+				},
 			},
 			{
-				Type:        discordgo.ApplicationCommandOptionInteger,
-				Name:        "quantity",
-				Description: "Amount to give",
-				Required:    false,
-			},
-		},
-	}
-
-	SetStock = &discordgo.ApplicationCommand{
-		Name:        "set-stock",
-		Description: "Set stock for an item (Admin)",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "item",
-				Description: "Name of the item",
-				Required:    true,
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "delete",
+				Description: "Delete a shop item",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "item",
+						Description: "Name of the item to delete",
+						Required:    true,
+					},
+				},
 			},
 			{
-				Type:        discordgo.ApplicationCommandOptionInteger,
-				Name:        "amount",
-				Description: "New stock amount",
-				Required:    true,
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "give",
+				Description: "Give an item to a user",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionUser,
+						Name:        "user",
+						Description: "User to give item to",
+						Required:    true,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "item",
+						Description: "Name of the item",
+						Required:    true,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionInteger,
+						Name:        "quantity",
+						Description: "Amount to give",
+						Required:    false,
+					},
+				},
 			},
-		},
-	}
-
-	ItemOptions = &discordgo.ApplicationCommand{
-		Name:        "item-options",
-		Description: "View all editable item options (Admin)",
-	}
-
-	CheckRedeem = &discordgo.ApplicationCommand{
-		Name:        "check-redeem",
-		Description: "Check information about a redeem code (Admin)",
-		Options: []*discordgo.ApplicationCommandOption{
 			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "code",
-				Description: "Redeem code to check",
-				Required:    true,
-			},
-		},
-	}
-
-	RedeemClaimed = &discordgo.ApplicationCommand{
-		Name:        "redeem-claimed",
-		Description: "Mark a redeem code as claimed/expired (Admin)",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "code",
-				Description: "Redeem code to mark as claimed",
-				Required:    true,
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Name:        "stock",
+				Description: "Set item stock",
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Type:        discordgo.ApplicationCommandOptionString,
+						Name:        "item",
+						Description: "Name of the item",
+						Required:    true,
+					},
+					{
+						Type:        discordgo.ApplicationCommandOptionInteger,
+						Name:        "amount",
+						Description: "New stock amount (-1 for infinite)",
+						Required:    true,
+					},
+				},
 			},
 		},
 	}

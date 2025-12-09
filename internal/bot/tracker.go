@@ -2,7 +2,6 @@ package bot
 
 import (
 	"log"
-	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -14,18 +13,12 @@ func (b *Bot) MessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	// Prefix command handling
-	prefix := "!"
-	if strings.HasPrefix(m.Content, prefix) {
-		b.HandlePrefixCommand(m)
-		return // Stop further processing if it's a command
-	}
-
 	// Track user stats
 	if m.GuildID != "" {
-		err := b.DB.IncrementMessageCount(m.GuildID, m.Author.ID)
+		// Use Redis for high-performance counting
+		err := b.Redis.IncrementMessageCountHash(m.GuildID, m.Author.ID)
 		if err != nil {
-			log.Printf("Error incrementing message count: %v", err)
+			log.Printf("Error incrementing message count in Redis: %v", err)
 		}
 	}
 }
@@ -86,5 +79,37 @@ func (b *Bot) VoiceStateUpdate(s *discordgo.Session, v *discordgo.VoiceStateUpda
 	} else {
 		// User left voice completely
 		delete(b.VoiceSessions, userID)
+	}
+}
+
+func (b *Bot) MessageCountFlusher() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		for _, g := range b.Session.State.Guilds {
+			counts, err := b.Redis.GetAndClearGuildMessageCounts(g.ID)
+			if err != nil {
+				log.Printf("Error getting message counts for guild %s: %v", g.ID, err)
+				continue
+			}
+
+			if len(counts) == 0 {
+				continue
+			}
+
+			// Batch update DB
+			// Ideally we should have a BatchIncrementMessageCount in DB
+			// For now, loop (still better than per-message)
+			// Or better: use a transaction or prepared statement
+			for userID, count := range counts {
+				// We need to add 'count', not just increment by 1
+				// But DB.IncrementMessageCount increments by 1.
+				// I need to add AddMessageCount to DB.
+				if err := b.DB.AddMessageCount(g.ID, userID, int(count)); err != nil {
+					log.Printf("Error flushing message count for user %s: %v", userID, err)
+				}
+			}
+		}
 	}
 }

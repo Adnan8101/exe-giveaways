@@ -2,8 +2,8 @@ package commands
 
 import (
 	"discord-giveaway-bot/internal/commands/framework"
-	"discord-giveaway-bot/internal/database"
 	"discord-giveaway-bot/internal/models"
+	"discord-giveaway-bot/internal/services"
 	"discord-giveaway-bot/internal/utils"
 	"fmt"
 	"log"
@@ -119,8 +119,9 @@ var GCreate = &discordgo.ApplicationCommand{
 	},
 }
 
-func GCreateCmd(ctx framework.Context, db *database.Database) {
-	// ... (Permissions check)
+func GCreateCmd(ctx framework.Context, service *services.GiveawayService) {
+	// ...existing code...
+
 	if ctx.GetMember().Permissions&discordgo.PermissionManageGuild == 0 {
 		ctx.ReplyEphemeral("❌ You need Manage Server permissions to start giveaways.")
 		return
@@ -262,13 +263,17 @@ func GCreateCmd(ctx framework.Context, db *database.Database) {
 		}
 
 		g.MessageID = msg.ID
-		id, err := db.CreateGiveaway(g)
+		id, err := service.DB.CreateGiveaway(g)
 		if err != nil {
 			ctx.ReplyEphemeral(fmt.Sprintf("❌ Failed to save giveaway: %s", err.Error()))
 			// Try to delete the message if save failed
 			slashCtx.Session.ChannelMessageDelete(channelID, msg.ID)
 			return
 		}
+		// Invalidate cache
+		service.Redis.InvalidateActiveGiveaways(g.GuildID)
+		// Add to ending queue
+		service.Redis.AddToEndingQueue(g.MessageID, g.EndTime)
 
 		// Add reaction with custom/stolen emoji
 		err = slashCtx.Session.MessageReactionAdd(channelID, msg.ID, g.Emoji)
@@ -342,11 +347,15 @@ func GCreateCmd(ctx framework.Context, db *database.Database) {
 		}
 
 		g.MessageID = msg.ID
-		id, err := db.CreateGiveaway(g)
+		id, err := service.DB.CreateGiveaway(g)
 		if err != nil {
 			ctx.Reply(fmt.Sprintf("❌ Failed to save giveaway: %s", err.Error()))
 			return
 		}
+		// Invalidate cache
+		service.Redis.InvalidateActiveGiveaways(g.GuildID)
+		// Add to ending queue
+		service.Redis.AddToEndingQueue(g.MessageID, g.EndTime)
 
 		// Add reaction
 		err = ctx.GetSession().MessageReactionAdd(ctx.GetChannelID(), msg.ID, "🎉")
@@ -361,7 +370,7 @@ func GCreateCmd(ctx framework.Context, db *database.Database) {
 	}
 }
 
-func HandleGCreate(s *discordgo.Session, i *discordgo.InteractionCreate, db *database.Database) {
+func HandleGCreate(s *discordgo.Session, i *discordgo.InteractionCreate, service *services.GiveawayService) {
 	ctx := framework.NewSlashContext(s, i)
-	GCreateCmd(ctx, db)
+	GCreateCmd(ctx, service)
 }

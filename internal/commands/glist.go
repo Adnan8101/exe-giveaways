@@ -2,7 +2,7 @@ package commands
 
 import (
 	"discord-giveaway-bot/internal/commands/framework"
-	"discord-giveaway-bot/internal/database"
+	"discord-giveaway-bot/internal/services"
 	"fmt"
 	"strings"
 	"time"
@@ -15,8 +15,8 @@ var GList = &discordgo.ApplicationCommand{
 	Description: "List active giveaways",
 }
 
-func GListCmd(ctx framework.Context, db *database.Database) {
-	giveaways, err := db.GetActiveGiveaways(ctx.GetGuildID())
+func GListCmd(ctx framework.Context, service *services.GiveawayService) {
+	giveaways, err := service.GetActiveGiveaways(ctx.GetGuildID())
 	if err != nil {
 		ctx.ReplyEphemeral(fmt.Sprintf("❌ Failed to fetch giveaways: %s", err.Error()))
 		return
@@ -38,7 +38,7 @@ func GListCmd(ctx framework.Context, db *database.Database) {
 	ctx.Reply(sb.String())
 }
 
-func HandleGList(s *discordgo.Session, i *discordgo.InteractionCreate, db *database.Database) {
+func HandleGList(s *discordgo.Session, i *discordgo.InteractionCreate, service *services.GiveawayService) {
 	ctx := framework.NewSlashContext(s, i)
-	GListCmd(ctx, db)
+	GListCmd(ctx, service)
 }

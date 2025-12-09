@@ -13,16 +13,16 @@ func (b *Bot) UnifiedMessageCreate(s *discordgo.Session, m *discordgo.MessageCre
 		return
 	}
 
-	// Route to both tracker and economy events concurrently
+	// Route to both tracker and command handler concurrently
 	go b.MessageCreate(s, m)
-	b.EconomyEvents.OnMessageCreate(s, m)
+	go b.HandlePrefixCommand(m)
 }
 
 // UnifiedVoiceStateUpdate consolidates all voice state update event handling
 func (b *Bot) UnifiedVoiceStateUpdate(s *discordgo.Session, v *discordgo.VoiceStateUpdate) {
 	// Route to both tracker and economy events concurrently
 	go b.VoiceStateUpdate(s, v)
-	b.EconomyEvents.OnVoiceStateUpdate(s, v)
+	go b.EconomyEvents.OnVoiceStateUpdate(s, v)
 }
 
 // UnifiedMessageReactionAdd consolidates all reaction add event handling
@@ -34,7 +34,7 @@ func (b *Bot) UnifiedMessageReactionAdd(s *discordgo.Session, r *discordgo.Messa
 
 	// Route to both giveaway and economy handlers concurrently
 	go b.MessageReactionAdd(s, r)
-	b.EconomyEvents.OnMessageReactionAdd(s, r)
+	go b.EconomyEvents.OnMessageReactionAdd(s, r)
 }
 
 // UnifiedMessageReactionRemove consolidates all reaction remove event handling
@@ -46,5 +46,5 @@ func (b *Bot) UnifiedMessageReactionRemove(s *discordgo.Session, r *discordgo.Me
 
 	// Route to both giveaway and economy handlers concurrently
 	go b.MessageReactionRemove(s, r)
-	b.EconomyEvents.OnMessageReactionRemove(s, r)
+	go b.EconomyEvents.OnMessageReactionRemove(s, r)
 }

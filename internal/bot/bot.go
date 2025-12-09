@@ -1,6 +1,7 @@
 package bot
 
 import (
+	antinukev2 "discord-giveaway-bot/internal/antinuke-v2"
 	"discord-giveaway-bot/internal/commands"
 	"discord-giveaway-bot/internal/commands/economy"
 	"discord-giveaway-bot/internal/commands/shop"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"go.uber.org/zap"
 )
 
 type Bot struct {
@@ -26,6 +28,7 @@ type Bot struct {
 	Redis             *redis.Client
 	Service           *services.GiveawayService
 	EconomyService    *services.EconomyService
+	AntiNukeV2        *antinukev2.Service // NEW: V2 Service
 	EconomyEvents     *EconomyEvents
 	ShopCommands      *shop.ShopCommand
 	AdminShopCommands *shop.AdminShopCommand
@@ -33,6 +36,7 @@ type Bot struct {
 	VoiceSessions     map[string]time.Time // UserID -> JoinTime
 	VoiceMutex        sync.Mutex
 	StartTime         time.Time
+	Logger            *zap.Logger // Logger for antinuke system
 }
 
 func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
@@ -47,7 +51,10 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 		discordgo.IntentsGuildMembers |
 		discordgo.IntentsGuildInvites |
 		discordgo.IntentsGuildVoiceStates |
-		discordgo.IntentsMessageContent
+		discordgo.IntentsMessageContent |
+		discordgo.IntentsGuildBans | // Required for Audit Log events (AntiNuke) - Maps to GUILD_MODERATION
+		discordgo.IntentsGuildWebhooks // Required for Webhook events
+	// Note: Audit log events are included in IntentsGuilds
 
 	// Enable state caching for fast lookups
 	s.StateEnabled = true
@@ -64,9 +71,15 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 	s.Compress = true // Enable gateway compression
 
 	economySvc := services.NewEconomyService(db, rdb)
-	svc := services.NewGiveawayService(s, db, economySvc)
+	svc := services.NewGiveawayService(s, db, rdb, economySvc)
 	blackjackCmd := economy.NewBlackjackCommand(db, economySvc)
 	economyEvents := NewEconomyEvents(economySvc, svc, db, blackjackCmd)
+
+	// Initialize AntiNuke V2 service
+	antiNukeV2 := antinukev2.New(s, db)
+
+	// Initialize logger for antinuke
+	logger, _ := zap.NewProduction()
 
 	b := &Bot{
 		Session:           s,
@@ -74,22 +87,24 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 		Redis:             rdb,
 		Service:           svc,
 		EconomyService:    economySvc,
+		AntiNukeV2:        antiNukeV2, // NEW: V2 Service
 		EconomyEvents:     economyEvents,
 		ShopCommands:      shop.NewShopCommand(db, economySvc),
 		AdminShopCommands: shop.NewAdminShopCommand(db),
 		BlackjackCommand:  blackjackCmd,
 		VoiceSessions:     make(map[string]time.Time),
 		StartTime:         time.Now(),
+		Logger:            logger,
 	}
 
 	// Register handlers - consolidated for maximum performance
-	// Using single registration per event type with internal routing
 	s.AddHandler(b.Ready)
 	s.AddHandler(b.InteractionCreate)
 	s.AddHandler(b.UnifiedMessageReactionAdd)    // Consolidated reaction handler
 	s.AddHandler(b.UnifiedMessageReactionRemove) // Consolidated reaction remove handler
 	s.AddHandler(b.UnifiedMessageCreate)         // Consolidated message handler
 	s.AddHandler(b.UnifiedVoiceStateUpdate)      // Consolidated voice handler
+	s.AddHandler(b.GuildCreate)                  // Handler for guild creation (command registration)
 
 	return b, nil
 }
@@ -102,20 +117,18 @@ func (b *Bot) Start() error {
 
 	// Register commands
 	log.Println("Registering commands...")
-	for _, cmd := range commands.Commands {
-		if cmd.Name == "gcreate" {
-			log.Printf("Registering gcreate with %d options:", len(cmd.Options))
-			for _, opt := range cmd.Options {
-				log.Printf("- %s (%v)", opt.Name, opt.Type)
-			}
-		}
-	}
 	_, err = b.Session.ApplicationCommandBulkOverwrite(b.Session.State.User.ID, "", commands.Commands)
 	if err != nil {
 		return fmt.Errorf("failed to register commands: %w", err)
 	}
+	log.Printf("✓ Registered %d regular commands", len(commands.Commands))
 
-	log.Println("Bot is running!")
+	// Start AntiNuke V2 (includes cache warming and gateway event handlers)
+	log.Println("Starting AntiNuke V2...")
+	b.AntiNukeV2.Start()
+
+	log.Println("\n🚀 Bot is running!")
+	log.Println("⚡ AntiNuke V2: Real-time gateway events + lock-free detection (<0.3ms target)")
 
 	// Start pprof server
 	go func() {
@@ -123,8 +136,17 @@ func (b *Bot) Start() error {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 
+	// Sync giveaway queue
+	log.Println("Syncing giveaway queue...")
+	if err := b.Service.SyncGiveawayQueue(); err != nil {
+		log.Printf("Failed to sync giveaway queue: %v", err)
+	}
+
 	// Start giveaway ticker
 	go b.GiveawayTicker()
+
+	// Start message count flusher
+	go b.MessageCountFlusher()
 
 	// Wait for interrupt
 	sc := make(chan os.Signal, 1)
@@ -136,6 +158,9 @@ func (b *Bot) Start() error {
 
 func (b *Bot) Close() error {
 	log.Println("Shutting down...")
+	if b.Logger != nil {
+		b.Logger.Sync() // Flush logger buffers
+	}
 	b.DB.Close()
 	b.Redis.Close()
 	return b.Session.Close()

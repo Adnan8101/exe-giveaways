@@ -12,26 +12,35 @@ func (b *Bot) GiveawayTicker() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		giveaways, err := b.DB.GetAllActiveGiveaways()
+		// Get giveaways that have ended
+		now := models.Now()
+		messageIDs, err := b.Redis.GetDueGiveaways(now)
 		if err != nil {
-			log.Printf("Error fetching active giveaways: %v", err)
+			log.Printf("Error fetching due giveaways: %v", err)
+			continue
+		}
+
+		if len(messageIDs) == 0 {
 			continue
 		}
 
 		// Process ending giveaways concurrently
-		now := models.Now()
 		var wg sync.WaitGroup
 
-		for _, g := range giveaways {
-			if g.EndTime <= now {
-				wg.Add(1)
-				go func(messageID string) {
-					defer wg.Done()
-					if err := b.Service.EndGiveaway(messageID); err != nil {
-						log.Printf("Error ending giveaway %s: %v", messageID, err)
-					}
-				}(g.MessageID)
-			}
+		for _, msgID := range messageIDs {
+			wg.Add(1)
+			go func(messageID string) {
+				defer wg.Done()
+
+				// Remove from queue first to prevent double processing
+				if err := b.Redis.RemoveFromEndingQueue(messageID); err != nil {
+					log.Printf("Error removing giveaway %s from queue: %v", messageID, err)
+				}
+
+				if err := b.Service.EndGiveaway(messageID); err != nil {
+					log.Printf("Error ending giveaway %s: %v", messageID, err)
+				}
+			}(msgID)
 		}
 
 		// Wait for all concurrent endings to complete

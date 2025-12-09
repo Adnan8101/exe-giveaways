@@ -48,31 +48,8 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) Ping() error {
-	// Check cache first (10-second TTL for ultra-low latency)
-	c.pingCacheMutex.RLock()
-	if time.Since(c.lastPingTime) < 10*time.Second {
-		err := c.lastPingError
-		c.pingCacheMutex.RUnlock()
-		return err
-	}
-	c.pingCacheMutex.RUnlock()
-
-	// Cache miss or expired - do actual ping
-	c.pingCacheMutex.Lock()
-	defer c.pingCacheMutex.Unlock()
-
-	// Double-check after acquiring write lock
-	if time.Since(c.lastPingTime) < 10*time.Second {
-		return c.lastPingError
-	}
-
 	// Do actual ping
-	err := c.client.Ping(ctx).Err()
-
-	// Update cache
-	c.lastPingTime = time.Now()
-	c.lastPingError = err
-	return err
+	return c.client.Ping(ctx).Err()
 }
 
 // Basic operations
@@ -120,6 +97,17 @@ func (c *Client) ZRevRangeWithScores(key string, start, stop int64) ([]redis.Z, 
 
 func (c *Client) ZScore(key string, member string) (float64, error) {
 	return c.client.ZScore(ctx, key, member).Result()
+}
+
+func (c *Client) ZRem(key string, members ...interface{}) error {
+	return c.client.ZRem(ctx, key, members...).Err()
+}
+
+func (c *Client) ZRangeByScore(key string, min, max string) ([]string, error) {
+	return c.client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
+		Min: min,
+		Max: max,
+	}).Result()
 }
 
 // Hash operations

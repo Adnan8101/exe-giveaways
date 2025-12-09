@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"discord-giveaway-bot/internal/commands/antinuke"
 	"discord-giveaway-bot/internal/commands/economy"
 	"discord-giveaway-bot/internal/commands/shop"
 	"discord-giveaway-bot/internal/commands/voice"
@@ -47,14 +48,12 @@ var Commands = []*discordgo.ApplicationCommand{
 	// Shop Commands
 	shop.Shop,
 	shop.Buy,
-	shop.ItemInfo,
-	shop.Inventory,
-	shop.CreateItem,
-	shop.EditItem,
-	shop.DeleteItem,
-	shop.GiveItem,
-	shop.SetStock,
-	shop.ItemOptions,
-	shop.CheckRedeem,
-	shop.RedeemClaimed,
+	shop.AdminShop,
+	// AntiNuke Commands
+	antinuke.PanicModeCmd,
+	antinuke.Enable,
+	antinuke.SetLimit,
+	antinuke.Punishment,
+	antinuke.Whitelist,
+	antinuke.Logs,
 }

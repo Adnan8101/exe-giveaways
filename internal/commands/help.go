@@ -1,6 +1,9 @@
 package commands
 
 import (
+	"fmt"
+	"strings"
+
 	"discord-giveaway-bot/internal/commands/framework"
 
 	"github.com/bwmarrin/discordgo"
@@ -19,14 +22,18 @@ var Help = &discordgo.ApplicationCommand{
 	},
 }
 
-func HelpCmd(ctx framework.Context) {
-	embed := &discordgo.MessageEmbed{
+var (
+	// Pre-computed static components for performance
+	helpEmbed = &discordgo.MessageEmbed{
 		Title:       "Bot Commands",
 		Description: "Select a category below to view commands.",
-		Color:       0x2b2d31, // Dark theme background (clean/colorless look)
+		Color:       0x2b2d31,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Select a module to view its commands",
+		},
 	}
 
-	menu := discordgo.SelectMenu{
+	helpMenu = discordgo.SelectMenu{
 		CustomID:    "help_category_select",
 		Placeholder: "Select a category",
 		Options: []discordgo.SelectMenuOption{
@@ -34,30 +41,45 @@ func HelpCmd(ctx framework.Context) {
 				Label:       "Giveaways",
 				Value:       "help_giveaways",
 				Description: "Manage giveaways",
+				Emoji:       &discordgo.ComponentEmoji{Name: "🎉"},
 			},
 			{
 				Label:       "Economy",
 				Value:       "help_economy",
 				Description: "Manage coins and rewards",
+				Emoji:       &discordgo.ComponentEmoji{Name: "💰"},
 			},
 			{
 				Label:       "Voice",
 				Value:       "help_voice",
 				Description: "Voice channel management",
+				Emoji:       &discordgo.ComponentEmoji{Name: "🔊"},
 			},
 			{
 				Label:       "Utility",
 				Value:       "help_utility",
 				Description: "General bot utilities",
+				Emoji:       &discordgo.ComponentEmoji{Name: "🛠️"},
 			},
 		},
 	}
 
-	ctx.ReplyComponent(embed, []discordgo.MessageComponent{
+	helpActionRow = []discordgo.MessageComponent{
 		discordgo.ActionsRow{
-			Components: []discordgo.MessageComponent{menu},
+			Components: []discordgo.MessageComponent{helpMenu},
 		},
-	})
+	}
+)
+
+func HelpCmd(ctx framework.Context) {
+	// Check if a specific command is requested
+	if len(ctx.GetArgs()) > 0 {
+		query := strings.ToLower(ctx.GetArgs()[0])
+		ctx.ReplyEphemeral(fmt.Sprintf("❌ Command `%s` not found.", query))
+		return
+	}
+
+	ctx.ReplyComponent(helpEmbed, helpActionRow)
 }
 
 func HandleHelpSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -69,6 +91,7 @@ func HandleHelpSelect(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	category := data.Values[0]
 	var embed *discordgo.MessageEmbed
 
+	// Existing categories
 	switch category {
 	case "help_giveaways":
 		embed = &discordgo.MessageEmbed{

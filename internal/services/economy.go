@@ -1,7 +1,6 @@
 package services
 
 import (
-	"discord-giveaway-bot/internal/commands/framework"
 	"discord-giveaway-bot/internal/database"
 	"discord-giveaway-bot/internal/models"
 	"discord-giveaway-bot/internal/redis"
@@ -283,9 +282,27 @@ func (s *EconomyService) GetTotalStats() (int64, int64, error) {
 // Prefix
 
 func (s *EconomyService) GetGuildPrefix(guildID string) (string, error) {
-	return s.db.GetGuildPrefix(guildID)
+	// Try Redis first
+	if prefix, ok := s.redis.GetPrefix(guildID); ok {
+		return prefix, nil
+	}
+
+	// Fallback to DB
+	prefix, err := s.db.GetGuildPrefix(guildID)
+	if err != nil {
+		return "", err
+	}
+
+	// Cache result
+	_ = s.redis.SetPrefix(guildID, prefix)
+
+	return prefix, nil
 }
 
-func (s *EconomyService) SetGuildPrefix(ctx framework.Context, args []string) {
-	// Wrapper for the command logic
+func (s *EconomyService) SetGuildPrefix(guildID, prefix string) error {
+	if err := s.db.SetGuildPrefix(guildID, prefix); err != nil {
+		return err
+	}
+	// Update cache
+	return s.redis.SetPrefix(guildID, prefix)
 }

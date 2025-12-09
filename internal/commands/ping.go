@@ -7,6 +7,7 @@ import (
 	"discord-giveaway-bot/internal/utils"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -35,19 +36,34 @@ func PingCmd(ctx framework.Context, db *database.Database, rdb *redis.Client) {
 	// Calculate API latency (heartbeat)
 	apiLatency := ctx.GetSession().HeartbeatLatency()
 
-	// Measure Database Latency
-	startDB := time.Now()
-	errDB := db.Ping()
-	dbLatency := time.Since(startDB)
+	// Measure Database and Redis Latency concurrently
+	var dbLatency, redisLatency time.Duration
+	var errDB, errRedis error
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		startDB := time.Now()
+		errDB = db.Ping()
+		dbLatency = time.Since(startDB)
+	}()
+
+	go func() {
+		defer wg.Done()
+		startRedis := time.Now()
+		errRedis = rdb.Ping()
+		redisLatency = time.Since(startRedis)
+	}()
+
+	wg.Wait()
+
 	dbStatus := fmt.Sprintf("`%dms`", dbLatency.Milliseconds())
 	if errDB != nil {
 		dbStatus = "`❌ Error`"
 	}
 
-	// Measure Redis Latency
-	startRedis := time.Now()
-	errRedis := rdb.Ping()
-	redisLatency := time.Since(startRedis)
 	redisStatus := fmt.Sprintf("`%dms`", redisLatency.Milliseconds())
 	if errRedis != nil {
 		redisStatus = "`❌ Error`"

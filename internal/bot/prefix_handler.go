@@ -11,7 +11,17 @@ import (
 )
 
 func (b *Bot) HandlePrefixCommand(m *discordgo.MessageCreate) {
-	content := strings.TrimPrefix(m.Content, "!")
+	// Fast prefix check using Redis cache
+	prefix, err := b.EconomyService.GetGuildPrefix(m.GuildID)
+	if err != nil {
+		prefix = "!"
+	}
+
+	if !strings.HasPrefix(m.Content, prefix) {
+		return
+	}
+
+	content := m.Content[len(prefix):]
 	parts := strings.Fields(content)
 	if len(parts) == 0 {
 		return
@@ -47,16 +57,22 @@ func (b *Bot) HandlePrefixCommand(m *discordgo.MessageCreate) {
 		economy.InvitesCmd(ctx, b.EconomyService)
 	case "coinflip", "cf":
 		economy.CoinflipCmd(ctx, b.EconomyService)
+	case "give":
+		economy.GiveCmd(ctx, b.EconomyService)
+	case "bj", "blackjack":
+		b.BlackjackCommand.Handle(b.Session, m, args)
+	case "set-prefix":
+		economy.SetPrefixCmd(ctx, b.DB)
 
 	// Giveaways
 	case "gcreate":
-		commands.GCreateCmd(ctx, b.DB)
+		commands.GCreateCmd(ctx, b.Service)
 	case "gend":
 		commands.GEndCmd(ctx, b.DB, b.Service)
 	case "greroll":
 		commands.GRerollCmd(ctx, b.Service)
 	case "glist":
-		commands.GListCmd(ctx, b.DB)
+		commands.GListCmd(ctx, b.Service)
 	case "gcancel":
 		commands.GCancelCmd(ctx, b.Service)
 
@@ -77,5 +93,9 @@ func (b *Bot) HandlePrefixCommand(m *discordgo.MessageCreate) {
 		voice.UndeafenAllCmd(ctx)
 	case "vcclear":
 		voice.VCClearCmd(ctx)
+	case "autodrag":
+		voice.AutoDragCmd(ctx, b.DB)
+	case "autoafk":
+		voice.AutoAFKCmd(ctx, b.DB)
 	}
 }
