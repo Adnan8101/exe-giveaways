@@ -34,7 +34,10 @@ func (r *RateLimiter) Check(guildID, actionType, userID string, limit int, windo
 	cutoff := now - int64(windowSecs)
 
 	// Get or create event window
-	val, _ := r.windows.LoadOrStore(key, &EventWindow{})
+	val, ok := r.windows.Load(key)
+	if !ok {
+		val, _ = r.windows.LoadOrStore(key, &EventWindow{})
+	}
 	window := val.(*EventWindow)
 
 	// Count events in current window (lock-free)

@@ -19,7 +19,7 @@ type Detector struct {
 	session     *discordgo.Session
 
 	// Async action queues (not on hot path)
-	loggingQueue    chan *ViolationEvent
+	loggingQueue chan *ViolationEvent
 
 	// Object pools for zero-allocation event handling
 	violationPool sync.Pool
@@ -56,10 +56,10 @@ type ViolationEvent struct {
 // NewDetector creates a new detection engine
 func NewDetector(cache *core.AtomicCache, rateLimiter *core.FastRateLimiter, session *discordgo.Session) *Detector {
 	d := &Detector{
-		cache:           cache,
-		rateLimiter:     rateLimiter,
-		session:         session,
-		loggingQueue:    make(chan *ViolationEvent, 1000),
+		cache:        cache,
+		rateLimiter:  rateLimiter,
+		session:      session,
+		loggingQueue: make(chan *ViolationEvent, 1000),
 	}
 
 	// Initialize object pools
@@ -87,38 +87,97 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 	// Start latency measurement immediately
 	start := time.Now()
 
-	// TRACE: Log EVERY event received
-	log.Printf("📥 [DETECTOR] Processing event: Guild=%s, Action=%d, User=%s",
-		guildID, *entry.ActionType, entry.UserID)
+	// TRACE: Log EVERY event received - COMMENTED OUT FOR SPEED
+	// log.Printf("📥 [DETECTOR] Processing event: Guild=%s, Action=%d, User=%s",
+	// 	guildID, *entry.ActionType, entry.UserID)
 
 	// Fast path 1: Validate guild ID
 	if guildID == "" {
-		log.Printf("⏭️  [DETECTOR] Empty guild ID, skipping")
+		// log.Printf("⏭️  [DETECTOR] Empty guild ID, skipping")
 		return // Invalid entry
 	}
 
 	// Fast path 1.5: Ignore self (prevent bot from flagging its own punishments)
 	if d.session.State.User != nil && entry.UserID == d.session.State.User.ID {
-		log.Printf("⏭️  [DETECTOR] Ignoring self action by %s", entry.UserID)
+		// log.Printf("⏭️  [DETECTOR] Ignoring self action by %s", entry.UserID)
 		return
 	}
 
 	// Fast path 2: Atomic config load (~50ns)
 	cfg := d.cache.GetConfig(guildID)
 	if cfg == nil {
-		log.Printf("⏭️  [DETECTOR] Guild %s: Config is nil, skipping", guildID)
+		// log.Printf("⏭️  [DETECTOR] Guild %s: Config is nil, skipping", guildID)
 		return
 	}
 	if !cfg.Enabled {
-		log.Printf("⏭️  [DETECTOR] Guild %s: AntiNuke disabled, skipping", guildID)
+		// log.Printf("⏭️  [DETECTOR] Guild %s: AntiNuke disabled, skipping", guildID)
 		return
 	}
 
 	// Map Discord action type to our action type
 	actionType := mapAuditLogAction(*entry.ActionType)
 	if actionType == "" {
-		log.Printf("⏭️  [DETECTOR] Unmapped action type: %d, skipping", *entry.ActionType)
+		// log.Printf("⏭️  [DETECTOR] Unmapped action type: %d, skipping", *entry.ActionType)
 		return // Not a monitored action
+	}
+
+	// PANIC MODE FAST TRACK - PRIORITY 1
+	if cfg.PanicMode {
+		// 1. Check Owner (Fastest)
+		if entry.UserID == cfg.OwnerID {
+			return
+		}
+
+		// 2. Check User Whitelist (Fast)
+		if d.cache.IsWhitelisted(guildID, entry.UserID) {
+			return
+		}
+
+		// 3. Check Role Whitelist
+		if member, err := d.session.State.Member(guildID, entry.UserID); err == nil {
+			for _, roleID := range member.Roles {
+				if d.cache.IsWhitelisted(guildID, roleID) {
+					return
+				}
+			}
+		}
+
+		// 4. EXECUTE BAN IMMEDIATELY
+		// No rate limit check, no further logic.
+		go func() {
+			d.session.GuildBanCreateWithReason(guildID, entry.UserID, "AntiNuke: Panic Mode Violation", 0)
+		}()
+
+		// 5. Async Logging
+		detectionLatency := time.Since(start)
+		// log.Printf("🚨 [DETECTOR] Panic Mode triggered: %s by %s in %v", actionType, entry.UserID, detectionLatency)
+
+		violation := &ViolationEvent{
+			GuildID:          guildID,
+			ActionType:       actionType,
+			ExecutorID:       entry.UserID,
+			Count:            1,
+			Limit:            0,
+			DetectionLatency: detectionLatency,
+			LogsChannel:      cfg.LogsChannel,
+		}
+		select {
+		case d.loggingQueue <- violation:
+		default:
+		}
+		
+		// Attempt revocation in parallel
+		go func() {
+			revocation := &RevocationTask{
+				GuildID:    guildID,
+				ActionType: actionType,
+				UserID:     entry.UserID,
+				TargetID:   entry.TargetID,
+			}
+			d.revokeAction(revocation)
+		}()
+
+		return
 	}
 
 	// Fast path 6: Get action limit config (~50ns) - Moved UP check faster
@@ -134,14 +193,7 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 		actionType == models.ActionCreateWebhooks ||
 		actionType == models.ActionBanMembers
 
-	if cfg.PanicMode {
-		// PANIC MODE: Strict limits for EVERYTHING
-		// Limit 0 means ANY action triggers punishment immediately
-		limitCount = 0
-		windowSeconds = 1
-		punishment = models.PunishmentBan
-		log.Printf("🚨 [DETECTOR] Panic Mode active for guild %s", guildID)
-	} else if limit != nil && limit.Enabled {
+	if limit != nil && limit.Enabled {
 		// Normal configured limits
 		limitCount = limit.LimitCount
 		windowSeconds = limit.WindowSeconds
@@ -151,10 +203,10 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 		limitCount = 1
 		windowSeconds = 1
 		punishment = models.PunishmentBan
-		log.Printf("⚠️ [DETECTOR] Dangerous action %s detected with no config - applying strict defaults", actionType)
+		// log.Printf("⚠️ [DETECTOR] Dangerous action %s detected with no config - applying strict defaults", actionType)
 	} else {
 		// No config and not dangerous - skip
-		log.Printf("⏭️  [DETECTOR] No limit config for action %s, skipping", actionType)
+		// log.Printf("⏭️  [DETECTOR] No limit config for action %s, skipping", actionType)
 		return
 	}
 
@@ -162,13 +214,13 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 
 	// Fast path 3: Guild owner bypass (~100ns)
 	if executorID == cfg.OwnerID {
-		log.Printf("⏭️  [DETECTOR] User %s is guild owner, skipping", executorID)
+		// log.Printf("⏭️  [DETECTOR] User %s is guild owner, skipping", executorID)
 		return
 	}
 
 	// Fast path 4: Whitelist check (~100ns)
 	if d.cache.IsWhitelisted(guildID, executorID) {
-		log.Printf("⏭️  [DETECTOR] User %s is explicitly whitelisted, skipping", executorID)
+		// log.Printf("⏭️  [DETECTOR] User %s is explicitly whitelisted, skipping", executorID)
 		return
 	}
 
@@ -177,7 +229,7 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 	if member, err := d.session.State.Member(guildID, executorID); err == nil {
 		for _, roleID := range member.Roles {
 			if d.cache.IsWhitelisted(guildID, roleID) {
-				log.Printf("⏭️  [DETECTOR] User %s has whitelisted role %s, skipping", executorID, roleID)
+				// log.Printf("⏭️  [DETECTOR] User %s has whitelisted role %s, skipping", executorID, roleID)
 				return
 			}
 		}
@@ -194,8 +246,6 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 
 	// If not triggered, we're done (fast path complete)
 	if !triggered {
-		// Log check only if needed (commented out for speed)
-		// log.Printf("📊 [DETECTOR] Check: Action=%s, User=%s, Count=%d, Triggered=%v", actionType, executorID, count, triggered)
 		return
 	}
 
@@ -210,16 +260,11 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 			Punishment: punishment,
 			Reason:     "AntiNuke: Exceeded " + actionType + " limit",
 		}
-		
-		start := time.Now()
-		err := d.executePunishment(task)
-		latency := time.Since(start)
-		
-		if err != nil {
-			log.Printf("⚠️ Punishment failed for %s: %v (took %v)", userID, err, latency)
-		} else {
-			log.Printf("✓ Punished %s: %s (took %v)", userID, punishment, latency)
-		}
+
+		// start := time.Now()
+		d.executePunishment(task)
+		// latency := time.Since(start)
+		// log.Printf("✓ Punished %s: %s (took %v)", userID, punishment, latency)
 	}(guildID, executorID, punishment, actionType)
 
 	// PRIORITY 2: Execute revocation
@@ -230,20 +275,14 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 			UserID:     userID,
 			TargetID:   targetID,
 		}
-		
-		start := time.Now()
-		success := d.revokeAction(revocation)
-		latency := time.Since(start)
-		
-		if success {
-			log.Printf("✓ Revoked %s action: %s (took %v)", actionType, targetID, latency)
-		}
+
+		d.revokeAction(revocation)
 	}(guildID, actionType, executorID, entry.TargetID)
 
 	// PRIORITY 3: Logging and Metrics (Post-Action)
 	detectionLatency := time.Since(start)
-	log.Printf("⚡ AntiNuke triggered: %s by %s in %s (count: %d/%d, latency: %v)",
-		actionType, executorID, guildID, count, limitCount, detectionLatency)
+	// log.Printf("⚡ AntiNuke triggered: %s by %s in %s (count: %d/%d, latency: %v)",
+	// 	actionType, executorID, guildID, count, limitCount, detectionLatency)
 
 	// Queue logging (async)
 	violation := &ViolationEvent{
@@ -258,7 +297,7 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 	select {
 	case d.loggingQueue <- violation:
 	default:
-		log.Printf("⚠️ Logging queue full, dropping event")
+		// log.Printf("⚠️ Logging queue full, dropping event")
 	}
 }
 
