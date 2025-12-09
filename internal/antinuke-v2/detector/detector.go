@@ -44,13 +44,14 @@ type RevocationTask struct {
 
 // ViolationEvent represents a violation for logging
 type ViolationEvent struct {
-	GuildID          string
-	ActionType       string
-	ExecutorID       string
-	Count            int
-	Limit            int
-	DetectionLatency time.Duration
-	LogsChannel      string
+	GuildID           string
+	ActionType        string
+	ExecutorID        string
+	Count             int
+	Limit             int
+	DetectionLatency  time.Duration
+	PunishmentLatency time.Duration
+	LogsChannel       string
 }
 
 // NewDetector creates a new detection engine
@@ -142,39 +143,41 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 			}
 		}
 
-		// 4. EXECUTE BAN IMMEDIATELY
-		// No rate limit check, no further logic.
-		go func() {
-			d.session.GuildBanCreateWithReason(guildID, entry.UserID, "AntiNuke: Panic Mode Violation", 0)
-		}()
-
-		// 5. Async Logging
+		// 4. EXECUTE BAN IMMEDIATELY & LOG
 		detectionLatency := time.Since(start)
-		// log.Printf("🚨 [DETECTOR] Panic Mode triggered: %s by %s in %v", actionType, entry.UserID, detectionLatency)
 
-		violation := &ViolationEvent{
-			GuildID:          guildID,
-			ActionType:       actionType,
-			ExecutorID:       entry.UserID,
-			Count:            1,
-			Limit:            0,
-			DetectionLatency: detectionLatency,
-			LogsChannel:      cfg.LogsChannel,
-		}
-		select {
-		case d.loggingQueue <- violation:
-		default:
-		}
-		
-		// Attempt revocation in parallel
 		go func() {
-			revocation := &RevocationTask{
-				GuildID:    guildID,
-				ActionType: actionType,
-				UserID:     entry.UserID,
-				TargetID:   entry.TargetID,
+			// A. Punishment (Blocking in this goroutine, Priority 1)
+			pStart := time.Now()
+			d.session.GuildBanCreateWithReason(guildID, entry.UserID, "AntiNuke: Panic Mode Violation", 0)
+			punishmentLatency := time.Since(pStart)
+
+			// B. Revocation (Async)
+			go func() {
+				revocation := &RevocationTask{
+					GuildID:    guildID,
+					ActionType: actionType,
+					UserID:     entry.UserID,
+					TargetID:   entry.TargetID,
+				}
+				d.revokeAction(revocation)
+			}()
+
+			// C. Logging (After punishment)
+			violation := &ViolationEvent{
+				GuildID:           guildID,
+				ActionType:        actionType,
+				ExecutorID:        entry.UserID,
+				Count:             1,
+				Limit:             0,
+				DetectionLatency:  detectionLatency,
+				PunishmentLatency: punishmentLatency,
+				LogsChannel:       cfg.LogsChannel,
 			}
-			d.revokeAction(revocation)
+			select {
+			case d.loggingQueue <- violation:
+			default:
+			}
 		}()
 
 		return
@@ -250,10 +253,11 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 	}
 
 	// 🚨 CRITICAL PATH: Violation detected
-	// PRIORITY 1: Execute punishment IMMEDIATELY
-	// We spawn this goroutine BEFORE doing anything else (logging, metrics, etc.)
-	go func(guildID, userID, punishment, actionType string) {
-		// Construct task inside goroutine to avoid allocation on critical path
+	detectionLatency := time.Since(start)
+
+	// Spawn ONE master goroutine to handle everything in order
+	go func(guildID, userID, punishment, actionType, targetID string, count, limit int) {
+		// 1. Punishment (Blocking, Priority 1)
 		task := &PunishmentTask{
 			GuildID:    guildID,
 			UserID:     userID,
@@ -261,44 +265,37 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 			Reason:     "AntiNuke: Exceeded " + actionType + " limit",
 		}
 
-		// start := time.Now()
+		pStart := time.Now()
 		d.executePunishment(task)
-		// latency := time.Since(start)
-		// log.Printf("✓ Punished %s: %s (took %v)", userID, punishment, latency)
-	}(guildID, executorID, punishment, actionType)
+		punishmentLatency := time.Since(pStart)
 
-	// PRIORITY 2: Execute revocation
-	go func(guildID, actionType, userID, targetID string) {
-		revocation := &RevocationTask{
-			GuildID:    guildID,
-			ActionType: actionType,
-			UserID:     userID,
-			TargetID:   targetID,
+		// 2. Revocation (Async, Priority 2)
+		go func() {
+			revocation := &RevocationTask{
+				GuildID:    guildID,
+				ActionType: actionType,
+				UserID:     userID,
+				TargetID:   targetID,
+			}
+			d.revokeAction(revocation)
+		}()
+
+		// 3. Logging (Priority 3)
+		violation := &ViolationEvent{
+			GuildID:           guildID,
+			ActionType:        actionType,
+			ExecutorID:        userID,
+			Count:             count,
+			Limit:             limit,
+			DetectionLatency:  detectionLatency,
+			PunishmentLatency: punishmentLatency,
+			LogsChannel:       cfg.LogsChannel,
 		}
-
-		d.revokeAction(revocation)
-	}(guildID, actionType, executorID, entry.TargetID)
-
-	// PRIORITY 3: Logging and Metrics (Post-Action)
-	detectionLatency := time.Since(start)
-	// log.Printf("⚡ AntiNuke triggered: %s by %s in %s (count: %d/%d, latency: %v)",
-	// 	actionType, executorID, guildID, count, limitCount, detectionLatency)
-
-	// Queue logging (async)
-	violation := &ViolationEvent{
-		GuildID:          guildID,
-		ActionType:       actionType,
-		ExecutorID:       executorID,
-		Count:            count,
-		Limit:            limitCount,
-		DetectionLatency: detectionLatency,
-		LogsChannel:      cfg.LogsChannel,
-	}
-	select {
-	case d.loggingQueue <- violation:
-	default:
-		// log.Printf("⚠️ Logging queue full, dropping event")
-	}
+		select {
+		case d.loggingQueue <- violation:
+		default:
+		}
+	}(guildID, executorID, punishment, actionType, entry.TargetID, count, limitCount)
 }
 
 // mapAuditLogAction maps Discord audit log actions to our action types
@@ -459,6 +456,11 @@ func (d *Detector) loggingWorker() {
 				{
 					Name:   "Detection Speed",
 					Value:  fmt.Sprintf("%.2fµs", float64(violation.DetectionLatency.Microseconds())),
+					Inline: true,
+				},
+				{
+					Name:   "Punishment Speed",
+					Value:  fmt.Sprintf("%v", violation.PunishmentLatency),
 					Inline: true,
 				},
 			},
