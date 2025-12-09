@@ -143,16 +143,17 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 			}
 		}
 
-		// 4. EXECUTE BAN IMMEDIATELY & LOG
+		// 4. EXECUTE BAN IMMEDIATELY - SYNCHRONOUSLY (NO GOROUTINE)
 		detectionLatency := time.Since(start)
+		pStart := time.Now()
+		
+		// BAN FIRST - BLOCKING - FASTEST POSSIBLE
+		d.session.GuildBanCreateWithReason(guildID, entry.UserID, "AntiNuke: Panic Mode Violation", 0)
+		punishmentLatency := time.Since(pStart)
 
+		// AFTER BAN: Do everything else asynchronously
 		go func() {
-			// A. Punishment (Blocking in this goroutine, Priority 1)
-			pStart := time.Now()
-			d.session.GuildBanCreateWithReason(guildID, entry.UserID, "AntiNuke: Panic Mode Violation", 0)
-			punishmentLatency := time.Since(pStart)
-
-			// B. Revocation (Async)
+			// A. Revocation (Async)
 			go func() {
 				revocation := &RevocationTask{
 					GuildID:    guildID,
@@ -163,7 +164,7 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 				d.revokeAction(revocation)
 			}()
 
-			// C. Logging (After punishment)
+			// B. Logging (After punishment)
 			violation := &ViolationEvent{
 				GuildID:           guildID,
 				ActionType:        actionType,
@@ -255,21 +256,23 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 	// 🚨 CRITICAL PATH: Violation detected
 	detectionLatency := time.Since(start)
 
-	// Spawn ONE master goroutine to handle everything in order
-	go func(guildID, userID, punishment, actionType, targetID string, count, limit int) {
-		// 1. Punishment (Blocking, Priority 1)
-		task := &PunishmentTask{
-			GuildID:    guildID,
-			UserID:     userID,
-			Punishment: punishment,
-			Reason:     "AntiNuke: Exceeded " + actionType + " limit",
-		}
+	// EXECUTE BAN IMMEDIATELY - SYNCHRONOUSLY (NO GOROUTINE)
+	// This ensures ban happens FIRST before anything else can interfere
+	task := &PunishmentTask{
+		GuildID:    guildID,
+		UserID:     executorID,
+		Punishment: punishment,
+		Reason:     "AntiNuke: Exceeded " + actionType + " limit",
+	}
 
-		pStart := time.Now()
-		d.executePunishment(task)
-		punishmentLatency := time.Since(pStart)
+	pStart := time.Now()
+	// BAN FIRST - BLOCKING - FASTEST POSSIBLE
+	d.executePunishment(task)
+	punishmentLatency := time.Since(pStart)
 
-		// 2. Revocation (Async, Priority 2)
+	// AFTER BAN: Do everything else asynchronously
+	go func(guildID, userID, actionType, targetID string, count, limit int) {
+		// 1. Revocation (Async, Priority 2)
 		go func() {
 			revocation := &RevocationTask{
 				GuildID:    guildID,
@@ -280,7 +283,7 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 			d.revokeAction(revocation)
 		}()
 
-		// 3. Logging (Priority 3)
+		// 2. Logging (Priority 3)
 		violation := &ViolationEvent{
 			GuildID:           guildID,
 			ActionType:        actionType,
@@ -295,7 +298,7 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 		case d.loggingQueue <- violation:
 		default:
 		}
-	}(guildID, executorID, punishment, actionType, entry.TargetID, count, limitCount)
+	}(guildID, executorID, actionType, entry.TargetID, count, limitCount)
 }
 
 // mapAuditLogAction maps Discord audit log actions to our action types
