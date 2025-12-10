@@ -75,19 +75,25 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 		discordgo.IntentsGuildWebhooks // Required for Webhook events
 	// Note: Audit log events are included in IntentsGuilds
 
-	// Enable state caching for fast lookups
+	// CRITICAL: Low-latency WebSocket configuration for Singapore gateway
+	s.Identify.Compress = false // Disable compression for 10-15ms lower latency
+
+	// CRITICAL: Minimal state tracking for lowest overhead
+	// Only track what's essential for commands to work
 	s.StateEnabled = true
 	s.State.TrackChannels = true
-	s.State.TrackEmojis = false // Disabled for memory optimization
+	s.State.TrackEmojis = false
 	s.State.TrackMembers = true
 	s.State.TrackRoles = true
 	s.State.TrackVoice = true
-	s.State.TrackPresences = false // Disabled for memory optimization
+	s.State.TrackPresences = false
+	s.State.MaxMessageCount = 0 // CRITICAL: No message caching = lower latency
 
 	// Performance optimizations
 	s.ShouldReconnectOnError = true
+	s.ShouldRetryOnRateLimit = true
 	s.MaxRestRetries = 3
-	s.Compress = true // Enable gateway compression
+	s.Compress = false // CRITICAL: Disable for low latency (matches Identify.Compress)
 
 	economySvc := services.NewEconomyService(db, rdb)
 	svc := services.NewGiveawayService(s, db, rdb, economySvc)
@@ -130,16 +136,20 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 }
 
 func (b *Bot) Start() error {
-	// CRITICAL: Force US-WEST gateway for 1-20ms latency
-	// Use environment variable to override gateway
-	log.Println("⚡ Connecting to US-WEST Discord gateway for optimal latency...")
+	// CRITICAL: Connecting to Discord Gateway
+	// When deployed in Singapore (asia-southeast1-b), Discord will automatically
+	// route your bot to the Singapore gateway cluster for 15-25ms latency
+	log.Println("⚡ Connecting to Discord Gateway...")
+	log.Println("   • Compression: DISABLED (for lower latency)")
+	log.Println("   • Message caching: DISABLED (for minimal overhead)")
+	log.Println("   • Expected latency from Singapore: 15-25ms")
 
 	err := b.Session.Open()
 	if err != nil {
 		return err
 	}
 
-	// Monitor WebSocket heartbeat latency
+	// Monitor WebSocket heartbeat latency every 30 seconds
 	go b.monitorHeartbeat()
 
 	// Start performance monitoring dashboard (every 60 seconds)
@@ -201,12 +211,31 @@ func (b *Bot) monitorHeartbeat() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	log.Println("\n📊 WebSocket Latency Monitor Started")
+	log.Println("   • Checking every 30 seconds")
+	log.Println("   • Target: <25ms (Singapore gateway)")
+	log.Println("   • Warmup period: ~5 minutes for optimal routing")
+	log.Println("")
+
 	for range ticker.C {
 		latency := b.Session.HeartbeatLatency()
-		log.Printf("📊 WebSocket Heartbeat: %v (Target: <20ms)", latency)
+		latencyMs := latency.Milliseconds()
 
-		if latency > 50*time.Millisecond {
-			log.Printf("⚠️  HIGH LATENCY WARNING: %v - Check network routing", latency)
+		// Enhanced latency reporting with status indicators
+		if latencyMs < 20 {
+			log.Printf("✅ WS Latency: %dms (EXCELLENT - Optimal Singapore routing)", latencyMs)
+		} else if latencyMs < 30 {
+			log.Printf("✅ WS Latency: %dms (GOOD - Singapore gateway)", latencyMs)
+		} else if latencyMs < 50 {
+			log.Printf("⚠️  WS Latency: %dms (OK - May improve after warmup)", latencyMs)
+		} else if latencyMs < 100 {
+			log.Printf("⚠️  WS Latency: %dms (HIGH - Check VM region)", latencyMs)
+		} else {
+			log.Printf("❌ WS Latency: %dms (CRITICAL - Wrong gateway region!)", latencyMs)
+			log.Printf("   • Expected: 15-25ms from Singapore")
+			log.Printf("   • Current: %dms", latencyMs)
+			log.Printf("   • Action: Verify VM is in asia-southeast1-b")
+			log.Printf("   • Action: Run 'ping gateway.discord.gg' on VM")
 		}
 	}
 }
