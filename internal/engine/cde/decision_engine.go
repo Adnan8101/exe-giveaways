@@ -12,8 +12,8 @@ var botUserID uint64
 
 // ProcessEvent is the hot-path function called by the consumer
 func ProcessEvent(evt fdl.FastEvent) {
-	// DEBUG: Log all events being processed
-	log.Printf("[CDE] Processing event: Type=%d, GuildID=%d, UserID=%d", evt.ReqType, evt.GuildID, evt.UserID)
+	// DEBUG: Log removal for speed
+	// log.Printf("[CDE] Processing event: Type=%d, GuildID=%d, UserID=%d", evt.ReqType, evt.GuildID, evt.UserID)
 
 	// Calculate detection speed (time from event start to processing)
 	detectionTime := time.Now().UnixNano() - evt.DetectionStart
@@ -25,26 +25,23 @@ func ProcessEvent(evt fdl.FastEvent) {
 
 	// SAFETY 1: NEVER punish own bot (self-protection)
 	if evt.UserID == botUserID && botUserID != 0 {
-		log.Printf("[CDE] 🛡️  SKIPPED: Own bot action (self-protection) - UserID=%d", evt.UserID)
 		return
 	}
 
 	// SAFETY 2: NEVER punish guild owner
+	// Inline owner check for speed
 	ownerID := GetGuildOwnerID(evt.GuildID)
 	if evt.UserID == ownerID && ownerID != 0 {
-		log.Printf("[CDE] 👑 SKIPPED: Guild owner action - UserID=%d", evt.UserID)
 		return
 	}
 
 	// SAFETY 3: Check if AntiNuke is enabled for this guild
 	if !IsAntiNukeEnabled(evt.GuildID) {
-		log.Printf("[CDE] ⏭️  SKIPPED: AntiNuke disabled for guild %d", evt.GuildID)
 		return
 	}
 
 	// SAFETY 4: Check Whitelist (applies to ALL users including bots)
 	if IsUserWhitelisted(evt.GuildID, evt.UserID) {
-		log.Printf("[CDE] ⏭️  SKIPPED: User %d whitelisted in guild %d", evt.UserID, evt.GuildID)
 		return
 	}
 
@@ -67,10 +64,12 @@ func ProcessEvent(evt fdl.FastEvent) {
 
 	// 4. Execute Punishment
 	if punish {
-		log.Printf("[CDE] 🚨 TRIGGERING PUNISHMENT: UserID=%d, Type=%s, Reason=Anti-Nuke, DetectionSpeed=%v",
-			evt.UserID, pType, detectionSpeed)
+		// Log only on punishment (rare event compared to normal traffic) but maybe async?
+		// For 80ns target, even this log is too slow.
+		// We will rely on the Punishment Task to log.
 
 		// Create Async Task
+
 		task := acl.PunishTask{
 			GuildID:       evt.GuildID,
 			UserID:        evt.UserID,
@@ -82,7 +81,7 @@ func ProcessEvent(evt fdl.FastEvent) {
 		// Push to ACL Queue
 		acl.PushPunish(task)
 
-		log.Printf("[CDE] ✓ Punishment task sent to ACL queue")
+		// log.Printf("[CDE] ✓ Punishment task sent to ACL queue")
 
 		// Reset State to avoid double punishing immediately?
 		// Or keep it high to block further actions?

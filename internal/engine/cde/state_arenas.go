@@ -1,6 +1,8 @@
 package cde
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+)
 
 const (
 	MaxUsers  = 2_000_000
@@ -37,15 +39,21 @@ type UserInfo struct {
 }
 
 // GuildInfo represents guild config and state
+// Optimized for atomic access and cache locality
 type GuildInfo struct {
 	GuildID      uint64
 	ConfigBitmap uint64 // Flags for enabled features
 	OwnerID      uint64
 
-	// AntiNuke Configuration (loaded from database)
-	AntiNukeEnabled bool
-	PanicMode       bool
-	LogChannelID    uint64
+	// Atomic flags
+	// Bit 0: AntiNukeEnabled
+	// Bit 1: PanicMode
+	Flags uint32
+
+	LogChannelID uint64
+
+	// Atomic Whitelist Bitset (256 bits)
+	TrustedBitset [4]uint64
 
 	// Whitelists (IDs hashed into bloom filter or fixed array for O(1)?)
 	// For simplicity in hot path, we might just store a small fixed array of trusted IDs

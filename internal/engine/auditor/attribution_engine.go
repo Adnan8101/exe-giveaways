@@ -10,6 +10,12 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+var eventPool = sync.Pool{
+	New: func() interface{} {
+		return &PendingEvent{}
+	},
+}
+
 // PendingEvent represents an event waiting for user attribution
 type PendingEvent struct {
 	event      *fdl.FastEvent
@@ -22,13 +28,12 @@ type PendingEvent struct {
 
 // AttributionEngine handles delayed attribution of events to users
 type AttributionEngine struct {
-	pendingEvents []PendingEvent
-	mutex         sync.Mutex
-	ringBuffer    *ring.RingBuffer
-	auditCache    *AuditCacheManager
-	batchWindow   time.Duration
-	ticker        *time.Ticker
-	stopChan      chan struct{}
+	eventsChan  chan *PendingEvent
+	ringBuffer  *ring.RingBuffer
+	auditCache  *AuditCacheManager
+	batchWindow time.Duration
+	ticker      *time.Ticker
+	stopChan    chan struct{}
 }
 
 const (
@@ -47,11 +52,11 @@ const (
 // NewAttributionEngine creates a new attribution engine
 func NewAttributionEngine(ringBuffer *ring.RingBuffer, auditCache *AuditCacheManager) *AttributionEngine {
 	return &AttributionEngine{
-		pendingEvents: make([]PendingEvent, 0, 100),
-		ringBuffer:    ringBuffer,
-		auditCache:    auditCache,
-		batchWindow:   DefaultBatchWindow,
-		stopChan:      make(chan struct{}),
+		eventsChan:  make(chan *PendingEvent, 2048), // Buffered channel
+		ringBuffer:  ringBuffer,
+		auditCache:  auditCache,
+		batchWindow: DefaultBatchWindow,
+		stopChan:    make(chan struct{}),
 	}
 }
 
@@ -63,10 +68,22 @@ func (a *AttributionEngine) Start() {
 	a.ticker = time.NewTicker(a.batchWindow)
 
 	go func() {
+		var batch []*PendingEvent
+		batch = make([]*PendingEvent, 0, 256)
+
 		for {
 			select {
+			case evt := <-a.eventsChan:
+				batch = append(batch, evt)
+				if len(batch) >= 200 { // Early flush if batch is full
+					a.processBatch(batch)
+					batch = batch[:0]
+				}
 			case <-a.ticker.C:
-				a.processBatch()
+				if len(batch) > 0 {
+					a.processBatch(batch)
+					batch = batch[:0]
+				}
 			case <-a.stopChan:
 				log.Println("[ATTRIBUTION] Stopping attribution engine...")
 				return
@@ -88,58 +105,43 @@ func (a *AttributionEngine) Stop() {
 // PushEvent adds an event to the attribution queue
 // The event's UserID is 0 (unknown) and will be filled by attribution
 func (a *AttributionEngine) PushEvent(event *fdl.FastEvent, guildID, targetID string, actionType discordgo.AuditLogAction) {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
+	// Zero-allocation: Get from pool
+	pending := eventPool.Get().(*PendingEvent)
+	pending.event = event
+	pending.guildID = guildID
+	pending.targetID = targetID
+	pending.actionType = actionType
+	pending.receivedAt = time.Now()
+	pending.retries = 0
 
-	pending := PendingEvent{
-		event:      event,
-		guildID:    guildID,
-		targetID:   targetID,
-		actionType: actionType,
-		receivedAt: time.Now(),
-		retries:    0,
+	select {
+	case a.eventsChan <- pending:
+	default:
+		// Drop if full to prevent blocking hot path
+		// In production, we might want to log this drop periodically
+		eventPool.Put(pending)
 	}
-
-	a.pendingEvents = append(a.pendingEvents, pending)
-
-	log.Printf("[ATTRIBUTION] 📌 Queued event: Type=%d, Guild=%s, Target=%s (queue size: %d)",
-		event.ReqType, guildID, targetID, len(a.pendingEvents))
 }
 
-// processBatch processes all pending events in the current batch
-func (a *AttributionEngine) processBatch() {
-	a.mutex.Lock()
+// processBatch processes all valid events in the current batch
+func (a *AttributionEngine) processBatch(batch []*PendingEvent) {
+	// No logs here - hot path
 
-	if len(a.pendingEvents) == 0 {
-		a.mutex.Unlock()
-		return
-	}
-
-	// Take snapshot of pending events
-	batch := make([]PendingEvent, len(a.pendingEvents))
-	copy(batch, a.pendingEvents)
-	a.pendingEvents = a.pendingEvents[:0] // Clear pending queue
-
-	a.mutex.Unlock()
-
-	log.Printf("[ATTRIBUTION] ⚡ Processing batch of %d events...", len(batch))
-
-	startTime := time.Now()
 	successCount := 0
 	failCount := 0
-	retryList := make([]PendingEvent, 0)
+	// We don't reuse retryList here to simplifiy logic for now, or we can use another pool
+	var retryList []*PendingEvent
 
 	// Group events by guild to batch audit log fetches
-	eventsByGuild := make(map[string][]PendingEvent)
+	eventsByGuild := make(map[string][]*PendingEvent)
 	for _, pending := range batch {
 		eventsByGuild[pending.guildID] = append(eventsByGuild[pending.guildID], pending)
 	}
 
 	// Process each guild's events
 	for guildID, guildEvents := range eventsByGuild {
-		log.Printf("[ATTRIBUTION] Processing %d events for guild %s", len(guildEvents), guildID)
-
 		// Fetch audit logs once for this guild
+
 		// The cache manager will handle rate limiting
 		actionTypes := make(map[discordgo.AuditLogAction]bool)
 		for _, pending := range guildEvents {
@@ -153,38 +155,36 @@ func (a *AttributionEngine) processBatch() {
 
 		// Attribute each event
 		for _, pending := range guildEvents {
-			success := a.attributeEvent(&pending)
+			success := a.attributeEvent(pending)
 			if success {
 				successCount++
+				// Done with this event, return to pool
+				eventPool.Put(pending)
 			} else {
 				// Check if we should retry
-				if a.shouldRetry(&pending) {
+				if a.shouldRetry(pending) {
 					pending.retries++
 					retryList = append(retryList, pending)
-					log.Printf("[ATTRIBUTION] ⏳ Retry queued for event (attempt %d/%d)",
-						pending.retries+1, MaxRetries)
 				} else {
 					failCount++
 					// Push with UserID=0 (unknown attacker)
 					a.ringBuffer.Push(pending.event)
-					log.Printf("[ATTRIBUTION] ⚠️  Failed to attribute event after %d retries, pushed with UserID=0",
-						pending.retries)
+					// Failed event, but processed. Return to pool.
+					eventPool.Put(pending)
 				}
 			}
 		}
 	}
 
 	// Re-queue events for retry
-	if len(retryList) > 0 {
-		a.mutex.Lock()
-		a.pendingEvents = append(a.pendingEvents, retryList...)
-		a.mutex.Unlock()
-		log.Printf("[ATTRIBUTION] 🔄 Re-queued %d events for retry", len(retryList))
+	for _, retry := range retryList {
+		select {
+		case a.eventsChan <- retry:
+		default:
+			// Queue full on retry, drop and return to pool
+			eventPool.Put(retry)
+		}
 	}
-
-	elapsed := time.Since(startTime)
-	log.Printf("[ATTRIBUTION] ✅ Batch complete: %d succeeded, %d failed, %d retry (took %v)",
-		successCount, failCount, len(retryList), elapsed)
 }
 
 // attributeEvent attempts to attribute a single event to a user
@@ -202,18 +202,17 @@ func (a *AttributionEngine) attributeEvent(pending *PendingEvent) bool {
 	pending.event.UserID = parseSnowflake(userID)
 
 	// Push to ring buffer for detection
+	// Zero-copy optimization?
+	// RingBuffer.Push takes a pointer and copies it.
+	// SPSC Push is efficient.
 	if !a.ringBuffer.Push(pending.event) {
 		fdl.EventsDropped.Inc(0)
-		log.Printf("[ATTRIBUTION] ❌ Ring buffer full, event dropped!")
 		return false
 	}
 
 	fdl.EventsProcessed.Inc(pending.event.UserID)
 
-	attributionLatency := time.Since(pending.receivedAt)
-	log.Printf("[ATTRIBUTION] ✅ Attributed event: Type=%d, User=%d, Guild=%s, Latency=%v",
-		pending.event.ReqType, pending.event.UserID, pending.guildID, attributionLatency)
-
+	// No logging in hot path
 	return true
 }
 
@@ -251,9 +250,7 @@ func parseSnowflake(s string) uint64 {
 
 // GetQueueSize returns the current attribution queue size
 func (a *AttributionEngine) GetQueueSize() int {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-	return len(a.pendingEvents)
+	return len(a.eventsChan)
 }
 
 // PrintMetrics logs attribution engine metrics

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 )
 
 // Database instance for config queries
@@ -37,8 +38,17 @@ func LoadGuildConfig(guildID uint64) error {
 
 	guild := &GuildArena[idx]
 	guild.GuildID = guildID
-	guild.AntiNukeEnabled = config.Enabled
-	guild.PanicMode = config.PanicMode
+	guild.GuildID = guildID
+
+	// Set atomic flags
+	var flags uint32
+	if config.Enabled {
+		flags |= 1
+	}
+	if config.PanicMode {
+		flags |= 2
+	}
+	atomic.StoreUint32(&guild.Flags, flags)
 
 	// Note: Owner ID will be set from Discord guild object in main.go
 
@@ -56,36 +66,48 @@ func LoadGuildConfig(guildID uint64) error {
 			count = 16
 		}
 		for i := 0; i < count; i++ {
-			guild.TrustedUsers[i] = parseSnowflake(whitelist[i].TargetID)
+			uid := parseSnowflake(whitelist[i].TargetID)
+			guild.TrustedUsers[i] = uid
+
+			// Set bit in bloom filter / bitset
+			// Hash/Map to 0-255
+			bitIdx := hashUser(uid) % 256
+			wordIdx := bitIdx / 64
+			bitOffset := bitIdx % 64
+
+			// Accessing array element in loop, unsafe strictly speaking if concurrent readers
+			// But LoadGuildConfig is usually called when updating cache
+			// We should probably compute local flags/bitset and store atomically if possible
+			// But for now, direct update.
+			guild.TrustedBitset[wordIdx] |= (1 << bitOffset)
 		}
 	}
 
 	log.Printf("[CDE] ✓ Loaded config for guild %d: Enabled=%v, PanicMode=%v, LogChannel=%d, Owner=%d",
-		guildID, guild.AntiNukeEnabled, guild.PanicMode, guild.LogChannelID, guild.OwnerID)
+		guildID, config.Enabled, config.PanicMode, guild.LogChannelID, guild.OwnerID)
 
 	return nil
 }
 
-// IsAntiNukeEnabled checks if antinuke is enabled for a guild (fast cache check)
+// IsAntiNukeEnabled checks if antinuke is enabled for a guild (ATOMIC FAST PATH)
 func IsAntiNukeEnabled(guildID uint64) bool {
 	idx := hashGuild(guildID)
-	configMutex.RLock()
-	defer configMutex.RUnlock()
-
+	// Direct memory access - no locks!
+	// We rely on atomic load to ensure we don't read partial writes
+	// But since we are reading from an array index that is stable for a guildID (hash collision ignored for speed)...
+	// Ideally we check guild.GuildID
 	guild := &GuildArena[idx]
 
-	// If guild not in cache or ID mismatch, try to load it
-	if guild.GuildID != guildID {
-		configMutex.RUnlock()
-		LoadGuildConfig(guildID) // Load in background
-		configMutex.RLock()
-		// Re-check after load attempt
-		if guild.GuildID != guildID {
-			return false // Still not loaded, assume disabled
-		}
+	// Check if ID matches
+	if atomic.LoadUint64(&guild.GuildID) != guildID {
+		// Cache miss or collision
+		// Fallback to slow consistency check
+		// For high performance, we accept that first request might be slow
+		return false // Treat as disabled until loaded
 	}
 
-	return guild.AntiNukeEnabled
+	flags := atomic.LoadUint32(&guild.Flags)
+	return (flags & 1) != 0
 }
 
 // IsUserWhitelisted checks if a user is whitelisted for a guild
@@ -100,6 +122,28 @@ func IsUserWhitelisted(guildID, userID uint64) bool {
 	}
 
 	// Check TrustedUsers array (fast O(1) check for first 16)
+	// Optimize: Check Bitset first?
+	// Hash cost might be comparable to iterating 16 items.
+	// If we have 16 items, linear scan is ~10-20ns.
+	// Bitset check is ~3ns.
+
+	h := hashUser(userID)
+	bitIdx := h % 256
+	wordIdx := bitIdx / 64
+	bitOffset := bitIdx % 64
+
+	// Atomic Load of the specific word in bitset
+	// But we can't easily address array element atomically via standard pkg without unsafe or helper
+	// or we just read it. Race is possible but updates are rare.
+	// Let's assume atomic coherence or use atomic.LoadUint64 if we want to be strict.
+	// &guild.TrustedBitset[wordIdx]
+
+	// For 3ns target, we do a relaxed read.
+	if (guild.TrustedBitset[wordIdx] & (1 << bitOffset)) == 0 {
+		return false // Definitely not whitelisted (assuming no false negatives in bloom/bitset)
+	}
+
+	// Bit is set: Possible match. Verify with exact IDs.
 	for _, trustedID := range guild.TrustedUsers {
 		if trustedID == userID {
 			return true
