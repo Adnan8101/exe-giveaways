@@ -106,7 +106,11 @@ func main() {
 	acl.StartPunishWorker()
 	acl.StartLogger()
 
-	// 3. Start CDE Workers (The Brains)
+	// 3. Initialize CDE with Database (CRITICAL)
+	log.Println("   • Initializing CDE with database...")
+	cde.InitCDE(db)
+
+	// 4. Start CDE Workers (The Brains)
 	// Pin 2-4 workers depending on core count
 	numWorkers := numCPU / 2
 	if numWorkers < 2 {
@@ -151,9 +155,8 @@ func main() {
 	// Initialize ACL with Discord session
 	acl.InitPunishWorker(b.Session)
 
-	// Initialize logger with Discord session (will be set per-guild)
-	// For now, we'll set it on the first Ready event
-	// acl.InitLogger(b.Session, "log_channel_id")
+	// Initialize logger with Discord session (channel mapping set below)
+	acl.InitLogger(b.Session)
 
 	// Initialize and start audit log monitor
 	auditor := auditor.New(b.Session, eventRing)
@@ -164,6 +167,67 @@ func main() {
 	log.Println("   • CDE Workers:", numWorkers)
 	log.Println("   • Audit Log Monitor: Active")
 	log.Println("   • Target Detection: <3µs")
+
+	// =========================================================================
+	// LOAD GUILD CONFIGURATIONS
+	// =========================================================================
+	log.Println("📚 Loading guild configurations...")
+
+	// Add Ready handler to load configurations when bot connects
+	b.Session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
+		log.Printf("[READY] Bot connected as %s, loading configs for %d guilds", r.User.Username, len(r.Guilds))
+
+		// Load config for each guild
+		for _, guild := range r.Guilds {
+			guildID := guild.ID
+
+			// Parse guild ID to uint64
+			var gid uint64
+			for i := 0; i < len(guildID); i++ {
+				v := guildID[i] - '0'
+				gid = gid*10 + uint64(v)
+			}
+
+			// Load guild config into CDE cache
+			if err := cde.LoadGuildConfig(gid); err != nil {
+				log.Printf("[READY] Failed to load config for guild %s: %v", guildID, err)
+				continue
+			}
+
+			// Get log channel and configure logger
+			config, err := db.GetAntiNukeConfig(guildID)
+			if err == nil && config.Enabled && config.LogsChannel != "" {
+				acl.SetGuildLogChannel(guildID, config.LogsChannel)
+				log.Printf("[READY] Set log channel for guild %s: %s", guildID, config.LogsChannel)
+			}
+		}
+
+		log.Printf("[READY] ✓ Loaded configurations for %d guilds", len(r.Guilds))
+	})
+
+	// Add periodic config refresh (every 30 seconds)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			// Get all guild IDs from session
+			if b.Session.State == nil {
+				continue
+			}
+
+			var guildIDs []uint64
+			for _, guild := range b.Session.State.Guilds {
+				var gid uint64
+				for i := 0; i < len(guild.ID); i++ {
+					v := guild.ID[i] - '0'
+					gid = gid*10 + uint64(v)
+				}
+				guildIDs = append(guildIDs, gid)
+			}
+
+			cde.RefreshAllConfigs(guildIDs)
+		}
+	}()
 
 	// =========================================================================
 

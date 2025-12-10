@@ -2,7 +2,9 @@ package acl
 
 import (
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -10,11 +12,12 @@ import (
 
 // Logger configuration
 var (
-	logQueue      = make(chan LogEntry, 5000)
-	discordSess   *discordgo.Session
-	logChannelID  string
-	batchInterval = 100 * time.Millisecond
-	batchSize     = 10
+	logQueue       = make(chan LogEntry, 5000)
+	discordSess    *discordgo.Session
+	logChannels    = make(map[string]string) // guildID -> channelID mapping
+	logChannelLock sync.RWMutex
+	batchInterval  = 100 * time.Millisecond
+	batchSize      = 10
 )
 
 // LogEntry represents a single log entry
@@ -29,9 +32,24 @@ type LogEntry struct {
 }
 
 // InitLogger initializes the logger with Discord session
-func InitLogger(session *discordgo.Session, channelID string) {
+func InitLogger(session *discordgo.Session) {
 	discordSess = session
-	logChannelID = channelID
+	log.Println("[LOGGER] Initialized with Discord session")
+}
+
+// SetGuildLogChannel sets the log channel for a specific guild
+func SetGuildLogChannel(guildID, channelID string) {
+	logChannelLock.Lock()
+	defer logChannelLock.Unlock()
+	logChannels[guildID] = channelID
+	log.Printf("[LOGGER] Set log channel for guild %s: %s", guildID, channelID)
+}
+
+// GetGuildLogChannel retrieves the log channel for a guild
+func GetGuildLogChannel(guildID string) string {
+	logChannelLock.RLock()
+	defer logChannelLock.RUnlock()
+	return logChannels[guildID]
 }
 
 // PushLog adds a log entry to the queue
@@ -78,7 +96,7 @@ func StartLogger() {
 			}
 
 			// Discord output (if configured)
-			if discordSess != nil && logChannelID != "" {
+			if discordSess != nil {
 				sendToDiscord(batch)
 			}
 
@@ -101,6 +119,30 @@ func StartLogger() {
 
 // sendToDiscord sends batched logs to Discord channel
 func sendToDiscord(entries []LogEntry) {
+	if len(entries) == 0 {
+		return
+	}
+
+	// Group entries by guild
+	guildEntries := make(map[string][]LogEntry)
+	for _, entry := range entries {
+		if entry.GuildID != "" {
+			guildEntries[entry.GuildID] = append(guildEntries[entry.GuildID], entry)
+		}
+	}
+
+	// Send to each guild's log channel
+	for guildID, guildLogs := range guildEntries {
+		channelID := GetGuildLogChannel(guildID)
+		if channelID == "" {
+			continue // No log channel configured for this guild
+		}
+		sendToChannel(channelID, guildLogs)
+	}
+}
+
+// sendToChannel sends logs to a specific channel
+func sendToChannel(channelID string, entries []LogEntry) {
 	if len(entries) == 0 {
 		return
 	}
@@ -130,9 +172,9 @@ func sendToDiscord(entries []LogEntry) {
 		},
 	}
 
-	_, err := discordSess.ChannelMessageSendEmbed(logChannelID, embed)
+	_, err := discordSess.ChannelMessageSendEmbed(channelID, embed)
 	if err != nil {
-		fmt.Printf("[LOGGER] Failed to send to Discord: %v\n", err)
+		fmt.Printf("[LOGGER] Failed to send to Discord channel %s: %v\n", channelID, err)
 	}
 }
 

@@ -34,6 +34,11 @@ type GuildInfo struct {
 	ConfigBitmap uint64 // Flags for enabled features
 	OwnerID      uint64
 
+	// AntiNuke Configuration (loaded from database)
+	AntiNukeEnabled bool
+	PanicMode       bool
+	LogChannelID    uint64
+
 	// Whitelists (IDs hashed into bloom filter or fixed array for O(1)?)
 	// For simplicity in hot path, we might just store a small fixed array of trusted IDs
 	// or point to a read-only structure.
