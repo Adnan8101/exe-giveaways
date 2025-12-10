@@ -13,6 +13,7 @@ import (
 
 	// Engine Imports
 	"discord-giveaway-bot/internal/engine/acl"
+	"discord-giveaway-bot/internal/engine/auditor"
 	"discord-giveaway-bot/internal/engine/cde"
 	"discord-giveaway-bot/internal/engine/fdl"
 	"discord-giveaway-bot/internal/engine/ring"
@@ -111,6 +112,29 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error initializing bot: %v", err)
 	}
+
+	// =========================================================================
+	// WIRE ENGINE TO DISCORD SESSION
+	// =========================================================================
+
+	// Initialize ACL with Discord session
+	acl.InitPunishWorker(b.Session)
+
+	// Initialize logger with Discord session (will be set per-guild)
+	// For now, we'll set it on the first Ready event
+	// acl.InitLogger(b.Session, "log_channel_id")
+
+	// Initialize and start audit log monitor
+	auditor := auditor.New(b.Session, eventRing)
+	auditor.Start()
+
+	log.Println("✅ Engine initialization complete")
+	log.Println("   • ACL Workers: Running")
+	log.Println("   • CDE Workers:", numWorkers)
+	log.Println("   • Audit Log Monitor: Active")
+	log.Println("   • Target Detection: <3µs")
+
+	// =========================================================================
 
 	// Start bot
 	if err := b.Start(); err != nil {

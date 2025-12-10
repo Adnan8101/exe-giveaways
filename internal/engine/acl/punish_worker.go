@@ -2,6 +2,10 @@ package acl
 
 import (
 	"fmt"
+	"log"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 // PunishTask represents an action to be taken via Discord API
@@ -17,6 +21,14 @@ type PunishTask struct {
 // Size should be large enough to handle bursts
 var punishQueue = make(chan PunishTask, 1000)
 
+// Discord session (injected at startup)
+var discordSession *discordgo.Session
+
+// InitPunishWorker initializes the punishment worker with Discord session
+func InitPunishWorker(session *discordgo.Session) {
+	discordSession = session
+}
+
 // PushPunish adds a task to the queue
 // Non-blocking drop if full to protect CDE?
 // Or blocking? For security, we might want to ensure it goes through,
@@ -29,6 +41,7 @@ func PushPunish(task PunishTask) {
 	default:
 		// ACL Overload - Drop or log error to atomic counter
 		// For now, silent drop to preserve CDE latency
+		log.Printf("[ACL] WARNING: Punishment queue full, dropping task for user %d", task.UserID)
 	}
 }
 
@@ -42,11 +55,89 @@ func StartPunishWorker() {
 }
 
 func executePunishment(task PunishTask) {
-	// In a real implementation this calls DiscordGo or Resty
-	// For now we just simulate
-	fmt.Printf("[ACL] EXECUTING PUNISHMENT: %s on %d in %d (Reason: %s)\n",
-		task.Type, task.UserID, task.GuildID, task.Reason)
+	start := time.Now()
 
-	// Simulate API Latency
-	// time.Sleep(50 * time.Millisecond)
+	if discordSession == nil {
+		log.Println("[ACL] ERROR: Discord session not initialized")
+		return
+	}
+
+	guildID := fmt.Sprintf("%d", task.GuildID)
+	userID := fmt.Sprintf("%d", task.UserID)
+
+	var err error
+	switch task.Type {
+	case "BAN":
+		err = discordSession.GuildBanCreateWithReason(guildID, userID, task.Reason, 0)
+		if err == nil {
+			PushLogEntry(LogEntry{
+				Message: fmt.Sprintf("Banned user %s", userID),
+				Level:   "critical",
+				GuildID: guildID,
+				UserID:  userID,
+				Action:  "BAN",
+				Latency: time.Since(start),
+			})
+		}
+
+	case "KICK":
+		err = discordSession.GuildMemberDeleteWithReason(guildID, userID, task.Reason)
+		if err == nil {
+			PushLogEntry(LogEntry{
+				Message: fmt.Sprintf("Kicked user %s", userID),
+				Level:   "error",
+				GuildID: guildID,
+				UserID:  userID,
+				Action:  "KICK",
+				Latency: time.Since(start),
+			})
+		}
+
+	case "TIMEOUT":
+		// Timeout for 5 minutes
+		timeout := time.Now().Add(5 * time.Minute)
+		err = discordSession.GuildMemberTimeout(guildID, userID, &timeout)
+		if err == nil {
+			PushLogEntry(LogEntry{
+				Message: fmt.Sprintf("Timed out user %s for 5 minutes", userID),
+				Level:   "warn",
+				GuildID: guildID,
+				UserID:  userID,
+				Action:  "TIMEOUT",
+				Latency: time.Since(start),
+			})
+		}
+
+	case "QUARANTINE":
+		// Remove all roles from the user
+		member, err := discordSession.GuildMember(guildID, userID)
+		if err == nil {
+			for _, roleID := range member.Roles {
+				discordSession.GuildMemberRoleRemove(guildID, userID, roleID)
+			}
+			PushLogEntry(LogEntry{
+				Message: fmt.Sprintf("Quarantined user %s (removed all roles)", userID),
+				Level:   "warn",
+				GuildID: guildID,
+				UserID:  userID,
+				Action:  "QUARANTINE",
+				Latency: time.Since(start),
+			})
+		}
+
+	default:
+		log.Printf("[ACL] Unknown punishment type: %s", task.Type)
+		return
+	}
+
+	if err != nil {
+		log.Printf("[ACL] Failed to execute %s on user %d: %v", task.Type, task.UserID, err)
+		PushLogEntry(LogEntry{
+			Message: fmt.Sprintf("Failed to %s user %s: %v", task.Type, userID, err),
+			Level:   "error",
+			GuildID: guildID,
+			UserID:  userID,
+			Action:  task.Type,
+		})
+	}
 }

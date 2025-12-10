@@ -148,6 +148,19 @@ func parseSnowflake(s string) uint64 {
 	return n
 }
 
+// ParseSnowflakeString is the exported version for external packages
+func ParseSnowflakeString(s string) uint64 {
+	return parseSnowflake(s)
+}
+
+// ParseAuditLogEntry parses audit log entry data from gateway events
+func ParseAuditLogEntry(data []byte) (*FastEvent, error) {
+	// Audit log entries come in a different structure than regular gateway events
+	// For now, we'll rely on the auditor package to do the conversion
+	// This function serves as a placeholder for future optimization
+	return nil, nil
+}
+
 // ByteSliceToString converts slice to string without alloc
 func ByteSliceToString(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
