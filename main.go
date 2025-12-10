@@ -15,7 +15,6 @@ import (
 	"discord-giveaway-bot/internal/engine/acl"
 	"discord-giveaway-bot/internal/engine/auditor"
 	"discord-giveaway-bot/internal/engine/cde"
-	"discord-giveaway-bot/internal/engine/fdl"
 	"discord-giveaway-bot/internal/engine/ring"
 	"time"
 
@@ -175,34 +174,75 @@ func main() {
 
 	// Add Ready handler to load configurations when bot connects
 	b.Session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
-		log.Printf("[READY] Bot connected as %s, loading configs for %d guilds", r.User.Username, len(r.Guilds))
+		log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Printf("🤖 Bot connected as %s#%s", r.User.Username, r.User.Discriminator)
+		log.Printf("📊 Guild Discovery: Found %d guilds", len(r.Guilds))
+		log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Println("")
+
+		if len(r.Guilds) == 0 {
+			log.Println("⚠️  WARNING: Bot is not in any guilds!")
+			log.Println("   Please invite the bot to a server to use antinuke features")
+			return
+		}
+
+		log.Println("📚 Loading antinuke configurations for each guild...")
+		log.Println("")
+
+		successCount := 0
+		failCount := 0
+		startTime := time.Now()
 
 		// Load config for each guild
-		for _, guild := range r.Guilds {
+		for i, guild := range r.Guilds {
 			guildID := guild.ID
+
+			log.Printf("[%d/%d] Loading guild: %s (ID: %s)", i+1, len(r.Guilds), guild.Name, guildID)
 
 			// Parse guild ID to uint64
 			var gid uint64
-			for i := 0; i < len(guildID); i++ {
-				v := guildID[i] - '0'
+			for j := 0; j < len(guildID); j++ {
+				v := guildID[j] - '0'
 				gid = gid*10 + uint64(v)
 			}
 
 			// Load guild config into CDE cache
 			if err := cde.LoadGuildConfig(gid); err != nil {
-				log.Printf("[READY] Failed to load config for guild %s: %v", guildID, err)
+				log.Printf("   ❌ Failed to load config: %v", err)
+				failCount++
 				continue
 			}
 
 			// Get log channel and configure logger
 			config, err := db.GetAntiNukeConfig(guildID)
-			if err == nil && config.Enabled && config.LogsChannel != "" {
-				acl.SetGuildLogChannel(guildID, config.LogsChannel)
-				log.Printf("[READY] Set log channel for guild %s: %s", guildID, config.LogsChannel)
+			if err == nil {
+				if config.Enabled {
+					log.Printf("   ✅ AntiNuke: ENABLED")
+					if config.LogsChannel != "" {
+						acl.SetGuildLogChannel(guildID, config.LogsChannel)
+						log.Printf("   📝 Log Channel: %s", config.LogsChannel)
+					} else {
+						log.Printf("   ⚠️  Log Channel: Not configured")
+					}
+				} else {
+					log.Printf("   💤 AntiNuke: DISABLED")
+				}
+				successCount++
+			} else {
+				log.Printf("   ⚠️  Config not found, using defaults")
+				successCount++
 			}
+			log.Println("")
 		}
 
-		log.Printf("[READY] ✓ Loaded configurations for %d guilds", len(r.Guilds))
+		elapsed := time.Since(startTime)
+		log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Printf("✅ Configuration Loading Complete:")
+		log.Printf("   • Success: %d/%d guilds", successCount, len(r.Guilds))
+		log.Printf("   • Failed: %d/%d guilds", failCount, len(r.Guilds))
+		log.Printf("   • Time taken: %v", elapsed)
+		log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Println("")
 	})
 
 	// Add periodic config refresh (every 30 seconds)
@@ -236,39 +276,8 @@ func main() {
 		log.Fatalf("Error starting bot: %v", err)
 	}
 
-	// Hook into DiscordGo events for the Fast Path
-	// Note: We use the Session from the bot to add a raw handler equivalent
-	// Fast Handlers for AntiNuke Engine
-	b.Session.AddHandler(func(s *discordgo.Session, e *discordgo.Event) {
-		start := time.Now()
-
-		// FAST PATH: Feed the Ring Buffer
-		if len(e.RawData) == 0 {
-			return
-		}
-
-		log.Printf("[MAIN] Received gateway event: Type=%s, Size=%d bytes", e.Type, len(e.RawData))
-
-		fastEvt, err := fdl.ParseFrame(e.RawData)
-		if err != nil {
-			log.Printf("[MAIN] Failed to parse event: %v", err)
-			return // Malformed or irrelevant event
-		}
-		if fastEvt != nil {
-			log.Printf("[MAIN] ✓ Parsed event: Type=%d, GuildID=%d, UserID=%d - Pushing to ring buffer",
-				fastEvt.ReqType, fastEvt.GuildID, fastEvt.UserID)
-			if !eventRing.Push(fastEvt) {
-				fdl.EventsDropped.Inc(0) // Increment dropped counter if buffer is full
-				log.Printf("[MAIN] ❌ Ring buffer full, event dropped!")
-			} else {
-				fdl.EventsProcessed.Inc(fastEvt.UserID) // Tentative count
-				log.Printf("[MAIN] ✓ Event pushed to ring buffer successfully")
-			}
-		} else {
-			log.Printf("[MAIN] Event parsed but fastEvt is nil (unknown/ignored event type)")
-		}
-
-		// Track high-res latency in PerfMonitor
-		b.GetPerfMonitor().TrackEvent(time.Since(start))
-	})
+	// Note: The generic Event handler has been removed.
+	// Event detection is now handled by specific gateway event handlers
+	// registered in the auditor package (event_handlers.go).
+	// This eliminates conflicts and provides better performance.
 }

@@ -40,6 +40,8 @@ func LoadGuildConfig(guildID uint64) error {
 	guild.AntiNukeEnabled = config.Enabled
 	guild.PanicMode = config.PanicMode
 
+	// Note: Owner ID will be set from Discord guild object in main.go
+
 	// Parse log channel ID if present
 	if config.LogsChannel != "" {
 		guild.LogChannelID = parseSnowflake(config.LogsChannel)
@@ -58,8 +60,8 @@ func LoadGuildConfig(guildID uint64) error {
 		}
 	}
 
-	log.Printf("[CDE] ✓ Loaded config for guild %d: Enabled=%v, PanicMode=%v, LogChannel=%d",
-		guildID, guild.AntiNukeEnabled, guild.PanicMode, guild.LogChannelID)
+	log.Printf("[CDE] ✓ Loaded config for guild %d: Enabled=%v, PanicMode=%v, LogChannel=%d, Owner=%d",
+		guildID, guild.AntiNukeEnabled, guild.PanicMode, guild.LogChannelID, guild.OwnerID)
 
 	return nil
 }
@@ -119,6 +121,25 @@ func GetLogChannelID(guildID uint64) uint64 {
 		return guild.LogChannelID
 	}
 	return 0
+}
+
+// GetGuildOwnerID returns the guild owner ID for a guild
+func GetGuildOwnerID(guildID uint64) uint64 {
+	idx := hashGuild(guildID)
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+
+	guild := &GuildArena[idx]
+	if guild.GuildID == guildID {
+		return guild.OwnerID
+	}
+	return 0
+}
+
+// SetBotUserID sets the bot's user ID (for self-protection)
+func SetBotUserID(userID uint64) {
+	botUserID = userID
+	log.Printf("[CDE] 🤖 Bot User ID set: %d (will never be punished)", botUserID)
 }
 
 // RefreshAllConfigs refreshes configurations for all active guilds
