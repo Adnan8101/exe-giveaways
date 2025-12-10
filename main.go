@@ -43,18 +43,19 @@ func main() {
 	numCPU := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCPU) // Use all available CPU cores
 
-	// Aggressive GC tuning for real-time performance
+	// ULTRA-AGGRESSIVE GC tuning for real-time performance
 	// Higher GC percentage = less frequent GC = lower latency spikes
-	gcPercent := 400
-	debug.SetGCPercent(gcPercent) // Increased from 200 - trade memory for speed
+	// Trade memory for speed - critical for sub-100ms operations
+	gcPercent := 800 // Increased from 400 - EXTREME performance mode
+	debug.SetGCPercent(gcPercent)
 
 	// Set memory limit to prevent OOM on 4GB RAM
 	memoryLimit := int64(3 * 1024 * 1024 * 1024) // 3GB limit (leave 1GB for OS)
 	debug.SetMemoryLimit(memoryLimit)
 
-	log.Println("⚙️  Runtime optimized for low latency:")
+	log.Println("⚙️  Runtime optimized for ULTRA-LOW latency:")
 	log.Printf("   • GOMAXPROCS: %d cores", numCPU)
-	log.Printf("   • GC Percent: %d (reduced GC frequency)", gcPercent)
+	log.Printf("   • GC Percent: %d (EXTREME mode - minimal GC pauses)", gcPercent)
 	log.Printf("   • Memory Limit: %d MB", memoryLimit/(1024*1024))
 
 	// Load config

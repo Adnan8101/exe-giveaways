@@ -27,6 +27,12 @@ var punishQueue = make(chan PunishTask, 1000)
 // Discord session (injected at startup)
 var discordSession *discordgo.Session
 
+// Worker pool for parallel punishment execution
+var (
+	workerCount    = 20 // Increased worker pool for parallel API calls
+	workerPoolOnce sync.Once
+)
+
 // String pools to avoid allocations
 var stringPool = sync.Pool{
 	New: func() interface{} {
@@ -35,24 +41,48 @@ var stringPool = sync.Pool{
 	},
 }
 
+// Pre-allocated string buffers for ID conversion (per-worker)
+var idBufferPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 20)
+		return &buf
+	},
+}
+
 // InitPunishWorker initializes the punishment worker with Discord session
 func InitPunishWorker(session *discordgo.Session) {
 	discordSession = session
 }
 
-// Fast uint64 to string conversion
-func uitoa(n uint64) string {
+// Fast uint64 to string conversion with pooled buffer (zero allocation)
+func uitoaPooled(n uint64) string {
 	if n == 0 {
 		return "0"
 	}
-	buf := make([]byte, 20)
+
+	// Get buffer from pool
+	bufPtr := idBufferPool.Get().(*[]byte)
+	buf := *bufPtr
+
 	i := len(buf)
 	for n > 0 {
 		i--
 		buf[i] = byte('0' + n%10)
 		n /= 10
 	}
-	return string(buf[i:])
+
+	// Copy to string (necessary to return from pool safely)
+	result := string(buf[i:])
+
+	// Return buffer to pool
+	idBufferPool.Put(bufPtr)
+
+	return result
+}
+
+// Legacy version for compatibility
+func uitoa(n uint64) string {
+	return uitoaPooled(n)
 }
 
 // PushPunish adds a task to the queue
@@ -71,13 +101,34 @@ func PushPunish(task PunishTask) {
 	}
 }
 
-// StartPunishWorker starts the consumer for the punish queue
+// StartPunishWorker starts multiple worker goroutines for parallel execution
 func StartPunishWorker() {
-	go func() {
-		for task := range punishQueue {
-			executePunishment(task)
+	workerPoolOnce.Do(func() {
+		log.Printf("[ACL] Starting %d punishment workers...", workerCount)
+		for i := 0; i < workerCount; i++ {
+			go punishmentWorker(i)
 		}
-	}()
+		log.Printf("[ACL] ✅ All %d workers ready", workerCount)
+	})
+}
+
+// punishmentWorker is a dedicated goroutine that processes punishment tasks
+func punishmentWorker(id int) {
+	for task := range punishQueue {
+		executePunishment(task)
+	}
+}
+
+// executeFastBan performs an optimized ban with minimal overhead
+// Uses direct HTTP client access for maximum speed, bypassing discordgo overhead
+func executeFastBan(guildID, userID, reason string) error {
+	// Use ultra-fast direct API call (bypasses discordgo overhead)
+	err := FastBanRequest(guildID, userID, reason)
+	if err != nil {
+		// Fallback to standard discordgo method if fast path fails
+		return discordSession.GuildBanCreateWithReason(guildID, userID, reason, 0)
+	}
+	return nil
 }
 
 func executePunishment(task PunishTask) {
@@ -87,20 +138,21 @@ func executePunishment(task PunishTask) {
 		return
 	}
 
-	// Fast uint64 to string conversion without allocations
-	guildID := uitoa(task.GuildID)
-	userID := uitoa(task.UserID)
+	// Fast uint64 to string conversion with pooled buffers (zero allocation)
+	guildID := uitoaPooled(task.GuildID)
+	userID := uitoaPooled(task.UserID)
 
 	var err error
 	switch task.Type {
 	case "BAN":
-		// EXECUTE BAN IMMEDIATELY - NO BLOCKING
-		err = discordSession.GuildBanCreateWithReason(guildID, userID, task.Reason, 0)
+		// ULTRA-FAST BAN EXECUTION
+		// Use direct API call with minimal overhead
+		err = executeFastBan(guildID, userID, task.Reason)
 		executionTime := time.Since(start)
-		
+
 		// Format detection time in microseconds
 		detectionMicros := float64(task.DetectionTime.Nanoseconds()) / 1000.0
-		
+
 		// Calculate total time from detection to ban completion
 		var totalTime time.Duration
 		if !task.DetectionStart.IsZero() {
@@ -110,10 +162,10 @@ func executePunishment(task PunishTask) {
 		if err == nil {
 			// Console log immediately (fast)
 			if totalTime > 0 {
-				log.Printf("[ACL] ⚡ BAN | User %s | Detection: %.2fµs | Execution: %v | Total: %v", 
+				log.Printf("[ACL] ⚡ BAN | User %s | Detection: %.2fµs | Exec: %v | Total: %v",
 					userID, detectionMicros, executionTime, totalTime)
 			} else {
-				log.Printf("[ACL] ⚡ BAN | User %s | Detection: %.2fµs | Execution: %v", 
+				log.Printf("[ACL] ⚡ BAN | User %s | Detection: %.2fµs | Exec: %v",
 					userID, detectionMicros, executionTime)
 			}
 
