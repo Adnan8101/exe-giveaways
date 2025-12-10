@@ -4,11 +4,17 @@ import "discord-giveaway-bot/internal/engine/fdl"
 
 // Rules constants - PANIC MODE: INSTANT DETECTION
 const (
-	ScoreThreshold = 20 // Lowered from 100 - instant trigger
-	MetricBan      = 25 // Higher weight for bans
-	MetricKick     = 15 // Higher weight for kicks
-	MetricChanDel  = 30 // 1 channel delete = instant ban
-	MetricRoleDel  = 30 // 1 role delete = instant ban
+	ScoreThreshold    = 20 // Lowered from 100 - instant trigger
+	MetricBan         = 30 // Instant ban
+	MetricKick        = 30 // Instant ban
+	MetricChanDel     = 30 // Instant ban
+	MetricRoleDel     = 30 // Instant ban
+	MetricChanCreate  = 30 // Instant ban on channel creation
+	MetricRoleCreate  = 30 // Instant ban on role creation
+	MetricChanUpdate  = 30 // Instant ban on channel update
+	MetricRoleUpdate  = 30 // Instant ban on role update
+	MetricGuildUpdate = 30 // Instant ban on guild update
+	MetricWebhook     = 30 // Instant ban on webhook creation
 )
 
 // EvaluateRules checks the event against the user state and returns a punishment if needed
@@ -21,12 +27,18 @@ func EvaluateRules(evt fdl.FastEvent, user *UserInfo) (bool, string) {
 		user.ThreatScore = 0
 		user.BanCount = 0
 		user.ChanDelCount = 0
+		user.ChanCreateCount = 0
+		user.RoleCreateCount = 0
+		user.ChanUpdateCount = 0
+		user.RoleUpdateCount = 0
+		user.GuildUpdateCount = 0
+		user.WebhookCount = 0
 	}
 	user.LastSeen = now
 
 	weight := 0
 
-	// Update Counts based on Event Type
+	// Update Counts based on Event Type - ALL EVENTS TRACKED
 	switch evt.ReqType {
 	case fdl.EvtGuildBanAdd:
 		user.BanCount++
@@ -40,6 +52,24 @@ func EvaluateRules(evt fdl.FastEvent, user *UserInfo) (bool, string) {
 	case fdl.EvtRoleDelete:
 		user.RoleDelCount++
 		weight = MetricRoleDel
+	case fdl.EvtChannelCreate:
+		user.ChanCreateCount++
+		weight = MetricChanCreate
+	case fdl.EvtRoleCreate:
+		user.RoleCreateCount++
+		weight = MetricRoleCreate
+	case fdl.EvtChannelUpdate:
+		user.ChanUpdateCount++
+		weight = MetricChanUpdate
+	case fdl.EvtRoleUpdate:
+		user.RoleUpdateCount++
+		weight = MetricRoleUpdate
+	case fdl.EvtGuildUpdate:
+		user.GuildUpdateCount++
+		weight = MetricGuildUpdate
+	case fdl.EvtWebhookCreate:
+		user.WebhookCount++
+		weight = MetricWebhook
 	}
 
 	// Accumulate Score
@@ -50,18 +80,36 @@ func EvaluateRules(evt fdl.FastEvent, user *UserInfo) (bool, string) {
 		return true, "BAN"
 	}
 
-	// Hard Limits (Instant Triggers) - PANIC MODE
+	// Hard Limits (Instant Triggers) - PANIC MODE: ANY 1 ACTION = BAN
 	if user.BanCount >= 1 {
-		return true, "BAN" // 1 ban = instant trigger
+		return true, "BAN"
 	}
 	if user.ChanDelCount >= 1 {
-		return true, "BAN" // 1 channel delete = instant trigger
+		return true, "BAN"
 	}
 	if user.RoleDelCount >= 1 {
-		return true, "BAN" // 1 role delete = instant trigger
+		return true, "BAN"
 	}
 	if user.KickCount >= 1 {
-		return true, "BAN" // 1 kick = instant trigger
+		return true, "BAN"
+	}
+	if user.ChanCreateCount >= 1 {
+		return true, "BAN"
+	}
+	if user.RoleCreateCount >= 1 {
+		return true, "BAN"
+	}
+	if user.ChanUpdateCount >= 1 {
+		return true, "BAN"
+	}
+	if user.RoleUpdateCount >= 1 {
+		return true, "BAN"
+	}
+	if user.GuildUpdateCount >= 1 {
+		return true, "BAN"
+	}
+	if user.WebhookCount >= 1 {
+		return true, "BAN"
 	}
 
 	return false, ""

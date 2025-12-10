@@ -18,6 +18,14 @@ type UserInfo struct {
 	ChanDelCount uint16
 	RoleDelCount uint16
 
+	// Additional event counters for all tracked events
+	ChanCreateCount  uint16
+	RoleCreateCount  uint16
+	ChanUpdateCount  uint16
+	RoleUpdateCount  uint16
+	GuildUpdateCount uint16
+	WebhookCount     uint16
+
 	// Windows: Simple timestamps for the last N actions for complex rules
 	LastActionTS int64
 
