@@ -100,6 +100,7 @@ func ProcessEvent(evt fdl.FastEvent) {
 		}
 
 		// Push to ACL Queue (Fast lane for bans)
+		// This is non-blocking if the queue has space
 		acl.PushPunish(task)
 	}
 }

@@ -98,6 +98,7 @@ func PushPunish(task PunishTask) {
 			return
 		default:
 			// Fast lane full, execute immediately in goroutine
+			// This ensures we never block the detection path
 			go executePunishmentDirect(task)
 			return
 		}
@@ -108,7 +109,7 @@ func PushPunish(task PunishTask) {
 	case punishQueue <- task:
 	default:
 		// ACL Overload - Drop or log error to atomic counter
-		log.Printf("[ACL] WARNING: Punishment queue full, dropping task for user %d", task.UserID)
+		// log.Printf("[ACL] WARNING: Punishment queue full, dropping task for user %d", task.UserID)
 	}
 }
 

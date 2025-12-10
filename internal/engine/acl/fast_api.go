@@ -27,14 +27,32 @@ func initFastClient() {
 			Name:                "AntiNuke-Bot",
 			MaxConnsPerHost:     1000,
 			MaxIdleConnDuration: 60 * time.Second,
-			ReadTimeout:         5 * time.Second,
-			WriteTimeout:        5 * time.Second,
-			MaxResponseBodySize: 1024, // We don't expect large responses for bans
+			ReadTimeout:         2 * time.Second,  // Aggressive timeout
+			WriteTimeout:        2 * time.Second,  // Aggressive timeout
+			MaxResponseBodySize: 1024,
 			// Optimize for speed
 			NoDefaultUserAgentHeader:      true,
 			DisableHeaderNamesNormalizing: true,
 			DisablePathNormalizing:        true,
+			// Connection pooling
+			Dial: (&fasthttp.TCPDialer{
+				Concurrency:      4096,
+				DNSCacheDuration: 1 * time.Hour,
+			}).Dial,
 		}
+
+		// Warmup connection
+		go func() {
+			for i := 0; i < 5; i++ {
+				req := fasthttp.AcquireRequest()
+				resp := fasthttp.AcquireResponse()
+				req.SetRequestURI("https://discord.com/api/v10/gateway")
+				fastClient.Do(req, resp)
+				fasthttp.ReleaseRequest(req)
+				fasthttp.ReleaseResponse(resp)
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
 	})
 }
 

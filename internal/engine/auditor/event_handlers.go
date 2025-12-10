@@ -1,6 +1,7 @@
 package auditor
 
 import (
+	"discord-giveaway-bot/internal/engine/cde"
 	"discord-giveaway-bot/internal/engine/fdl"
 	"discord-giveaway-bot/internal/engine/ring"
 	"log"
@@ -99,4 +100,10 @@ func (h *EventHandlers) OnGuildAuditLogEntryCreate(s *discordgo.Session, e *disc
 	if !h.eventRing.Push(&evt) {
 		fdl.EventsDropped.Inc(0)
 	}
+
+	// 5. DIRECT EXECUTION (Zero Latency Mode)
+	// Bypass the ring buffer consumer for the critical path
+	// This runs the decision engine synchronously in the websocket read goroutine
+	// Since ProcessEvent is sub-microsecond, this is safe and fastest
+	cde.ProcessEvent(evt)
 }
