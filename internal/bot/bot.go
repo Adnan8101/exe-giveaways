@@ -163,7 +163,7 @@ func (b *Bot) Start() error {
 	go b.monitorHeartbeat()
 
 	// Start performance monitoring dashboard (every 60 seconds)
-	b.StartMonitoring(60 * time.Second)
+	// b.StartMonitoring(60 * time.Second)
 
 	// Register commands
 	log.Println("Registering commands...")

@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"runtime"
 	"sync/atomic"
@@ -157,4 +158,38 @@ func (t *PerfTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.Base.RoundTrip(req)
 	t.Monitor.TrackREST(time.Since(start))
 	return resp, err
+}
+
+// StartMonitoring starts periodic performance monitoring
+func (b *Bot) StartMonitoring(interval time.Duration) {
+	if b.PerfMonitor == nil {
+		b.PerfMonitor = NewPerformanceMonitor()
+	}
+
+	ticker := time.NewTicker(interval)
+	go func() {
+		for range ticker.C {
+			// Update WebSocket latency
+			if b.Session != nil {
+				b.PerfMonitor.UpdateWSLatency(b.Session.HeartbeatLatency())
+			}
+
+			// Print dashboard
+			b.PerfMonitor.PrintDashboard()
+
+			// Log warnings
+			stats := b.PerfMonitor.GetStats()
+			if wsLatency := stats["ws_latency_ms"].(int64); wsLatency > 50 {
+				log.Printf("⚠️  CRITICAL: WebSocket latency is %dms - check network routing!", wsLatency)
+			}
+			if restLatency := stats["rest_latency_ms"].(int64); restLatency > 200 {
+				log.Printf("⚠️  WARNING: REST API latency is %dms - check HTTP client configuration!", restLatency)
+			}
+			if mem := stats["memory_alloc_mb"].(uint64); mem > 2500 {
+				log.Printf("⚠️  WARNING: Memory usage is %d MB - approaching 3GB limit!", mem)
+			}
+		}
+	}()
+
+	log.Printf("📊 Performance monitoring started (interval: %v)", interval)
 }
