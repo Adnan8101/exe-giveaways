@@ -11,21 +11,21 @@ import (
 // PerformanceMonitor tracks critical performance metrics
 type PerformanceMonitor struct {
 	// Command execution metrics
-	commandCount    atomic.Uint64
-	commandLatency  atomic.Int64 // microseconds
-	
+	commandCount   atomic.Uint64
+	commandLatency atomic.Int64 // microseconds
+
 	// Event processing metrics
-	eventCount      atomic.Uint64
-	eventLatency    atomic.Int64 // microseconds
-	
+	eventCount   atomic.Uint64
+	eventLatency atomic.Int64 // microseconds
+
 	// REST API metrics
-	restCallCount   atomic.Uint64
-	restLatency     atomic.Int64 // milliseconds
-	
+	restCallCount atomic.Uint64
+	restLatency   atomic.Int64 // milliseconds
+
 	// WebSocket metrics
-	wsLatency       atomic.Int64 // milliseconds
-	
-	startTime       time.Time
+	wsLatency atomic.Int64 // milliseconds
+
+	startTime time.Time
 }
 
 // NewPerformanceMonitor creates a new performance monitor
@@ -62,28 +62,28 @@ func (pm *PerformanceMonitor) UpdateWSLatency(latency time.Duration) {
 func (pm *PerformanceMonitor) GetStats() map[string]interface{} {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	return map[string]interface{}{
-		"uptime_seconds":        time.Since(pm.startTime).Seconds(),
-		"command_count":         pm.commandCount.Load(),
-		"command_latency_us":    pm.commandLatency.Load(),
-		"event_count":           pm.eventCount.Load(),
-		"event_latency_us":      pm.eventLatency.Load(),
-		"rest_call_count":       pm.restCallCount.Load(),
-		"rest_latency_ms":       pm.restLatency.Load(),
-		"ws_latency_ms":         pm.wsLatency.Load(),
-		"goroutines":            runtime.NumGoroutine(),
-		"memory_alloc_mb":       m.Alloc / 1024 / 1024,
-		"memory_sys_mb":         m.Sys / 1024 / 1024,
-		"gc_count":              m.NumGC,
-		"cpu_cores":             runtime.NumCPU(),
+		"uptime_seconds":     time.Since(pm.startTime).Seconds(),
+		"command_count":      pm.commandCount.Load(),
+		"command_latency_us": pm.commandLatency.Load(),
+		"event_count":        pm.eventCount.Load(),
+		"event_latency_us":   pm.eventLatency.Load(),
+		"rest_call_count":    pm.restCallCount.Load(),
+		"rest_latency_ms":    pm.restLatency.Load(),
+		"ws_latency_ms":      pm.wsLatency.Load(),
+		"goroutines":         runtime.NumGoroutine(),
+		"memory_alloc_mb":    m.Alloc / 1024 / 1024,
+		"memory_sys_mb":      m.Sys / 1024 / 1024,
+		"gc_count":           m.NumGC,
+		"cpu_cores":          runtime.NumCPU(),
 	}
 }
 
 // PrintDashboard prints a performance dashboard
 func (pm *PerformanceMonitor) PrintDashboard() {
 	stats := pm.GetStats()
-	
+
 	fmt.Println("\n╔════════════════════════════════════════════════════════════╗")
 	fmt.Println("║          🚀 PERFORMANCE DASHBOARD                          ║")
 	fmt.Println("╠════════════════════════════════════════════════════════════╣")
@@ -91,7 +91,7 @@ func (pm *PerformanceMonitor) PrintDashboard() {
 	fmt.Println("╠════════════════════════════════════════════════════════════╣")
 	fmt.Println("║ 📊 LATENCY METRICS (Target vs Actual)                     ║")
 	fmt.Println("╠════════════════════════════════════════════════════════════╣")
-	
+
 	wsLatency := stats["ws_latency_ms"].(int64)
 	wsStatus := "✅"
 	if wsLatency > 20 {
@@ -100,7 +100,7 @@ func (pm *PerformanceMonitor) PrintDashboard() {
 		wsStatus = "⚠️"
 	}
 	fmt.Printf("║ WebSocket:       %3dms (Target: <20ms)   %s          \n", wsLatency, wsStatus)
-	
+
 	restLatency := stats["rest_latency_ms"].(int64)
 	restStatus := "✅"
 	if restLatency > 150 {
@@ -109,7 +109,7 @@ func (pm *PerformanceMonitor) PrintDashboard() {
 		restStatus = "⚠️"
 	}
 	fmt.Printf("║ REST API:        %3dms (Target: <150ms)  %s          \n", restLatency, restStatus)
-	
+
 	cmdLatency := stats["command_latency_us"].(int64)
 	cmdLatencyMs := float64(cmdLatency) / 1000.0
 	cmdStatus := "✅"
@@ -119,7 +119,7 @@ func (pm *PerformanceMonitor) PrintDashboard() {
 		cmdStatus = "⚠️"
 	}
 	fmt.Printf("║ Command Exec:  %.2fms (Target: <5ms)    %s          \n", cmdLatencyMs, cmdStatus)
-	
+
 	eventLatency := stats["event_latency_us"].(int64)
 	eventLatencyMs := float64(eventLatency) / 1000.0
 	eventStatus := "✅"
@@ -127,7 +127,7 @@ func (pm *PerformanceMonitor) PrintDashboard() {
 		eventStatus = "⚠️"
 	}
 	fmt.Printf("║ Event Process: %.2fms (Target: <1ms)    %s          \n", eventLatencyMs, eventStatus)
-	
+
 	fmt.Println("╠════════════════════════════════════════════════════════════╣")
 	fmt.Println("║ 📈 THROUGHPUT                                              ║")
 	fmt.Println("╠════════════════════════════════════════════════════════════╣")
@@ -151,7 +151,7 @@ func (b *Bot) StartMonitoring(interval time.Duration) {
 	if b.PerfMonitor == nil {
 		b.PerfMonitor = NewPerformanceMonitor()
 	}
-	
+
 	ticker := time.NewTicker(interval)
 	go func() {
 		for range ticker.C {
@@ -159,10 +159,10 @@ func (b *Bot) StartMonitoring(interval time.Duration) {
 			if b.Session != nil {
 				b.PerfMonitor.UpdateWSLatency(b.Session.HeartbeatLatency())
 			}
-			
+
 			// Print dashboard
 			b.PerfMonitor.PrintDashboard()
-			
+
 			// Log warnings
 			stats := b.PerfMonitor.GetStats()
 			if wsLatency := stats["ws_latency_ms"].(int64); wsLatency > 50 {
@@ -176,6 +176,6 @@ func (b *Bot) StartMonitoring(interval time.Duration) {
 			}
 		}
 	}()
-	
+
 	log.Printf("📊 Performance monitoring started (interval: %v)", interval)
 }

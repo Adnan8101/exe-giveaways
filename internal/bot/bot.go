@@ -36,7 +36,7 @@ type Bot struct {
 	VoiceSessions     map[string]time.Time // UserID -> JoinTime
 	VoiceMutex        sync.Mutex
 	StartTime         time.Time
-	Logger            *zap.Logger // Logger for antinuke system
+	Logger            *zap.Logger         // Logger for antinuke system
 	PerfMonitor       *PerformanceMonitor // Performance monitoring
 }
 
@@ -55,8 +55,8 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 		ForceAttemptHTTP2:   true,
 		DisableCompression:  false,
 		// TCP optimizations
-		DisableKeepAlives:   false,
-		MaxConnsPerHost:     200,
+		DisableKeepAlives:     false,
+		MaxConnsPerHost:       200,
 		ResponseHeaderTimeout: 10 * time.Second,
 	}
 	s.Client = &http.Client{
@@ -133,7 +133,7 @@ func (b *Bot) Start() error {
 	// CRITICAL: Force US-WEST gateway for 1-20ms latency
 	// Use environment variable to override gateway
 	log.Println("⚡ Connecting to US-WEST Discord gateway for optimal latency...")
-	
+
 	err := b.Session.Open()
 	if err != nil {
 		return err
@@ -204,7 +204,7 @@ func (b *Bot) monitorHeartbeat() {
 	for range ticker.C {
 		latency := b.Session.HeartbeatLatency()
 		log.Printf("📊 WebSocket Heartbeat: %v (Target: <20ms)", latency)
-		
+
 		if latency > 50*time.Millisecond {
 			log.Printf("⚠️  HIGH LATENCY WARNING: %v - Check network routing", latency)
 		}

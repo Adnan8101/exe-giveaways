@@ -22,16 +22,16 @@ func main() {
 	// CRITICAL Performance optimizations for low latency
 	numCPU := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCPU) // Use all available CPU cores
-	
+
 	// Aggressive GC tuning for real-time performance
 	// Higher GC percentage = less frequent GC = lower latency spikes
 	gcPercent := 400
 	debug.SetGCPercent(gcPercent) // Increased from 200 - trade memory for speed
-	
+
 	// Set memory limit to prevent OOM on 4GB RAM
 	memoryLimit := int64(3 * 1024 * 1024 * 1024) // 3GB limit (leave 1GB for OS)
 	debug.SetMemoryLimit(memoryLimit)
-	
+
 	log.Println("🚀 Runtime optimized for low latency:")
 	log.Printf("   • GOMAXPROCS: %d cores", numCPU)
 	log.Printf("   • GC Percent: %d (reduced GC frequency)", gcPercent)

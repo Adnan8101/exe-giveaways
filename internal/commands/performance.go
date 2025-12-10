@@ -22,10 +22,10 @@ func HandlePerformance(s *discordgo.Session, i *discordgo.InteractionCreate, bot
 		GetPerfMonitor() interface{}
 		GetSession() *discordgo.Session
 	}
-	
+
 	var stats map[string]interface{}
 	var wsLatency time.Duration
-	
+
 	// Try to get performance stats from bot if available
 	if perfBot, ok := bot.(PerfBot); ok {
 		monitor := perfBot.GetPerfMonitor()
@@ -34,24 +34,24 @@ func HandlePerformance(s *discordgo.Session, i *discordgo.InteractionCreate, bot
 		}
 		wsLatency = perfBot.GetSession().HeartbeatLatency()
 	}
-	
+
 	// If stats not available, create from runtime
 	if stats == nil {
 		stats = getCurrentStats()
 		wsLatency = s.HeartbeatLatency()
 	}
-	
+
 	// Update WebSocket latency
 	stats["ws_latency_ms"] = wsLatency.Milliseconds()
-	
+
 	// Calculate uptime
 	uptimeDuration := time.Duration(stats["uptime_seconds"].(float64) * float64(time.Second))
 	uptimeStr := formatDuration(uptimeDuration)
-	
+
 	// Get memory stats
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	// Build performance embed
 	embed := &discordgo.MessageEmbed{
 		Title:       "🚀 Bot Performance Dashboard",
@@ -102,21 +102,21 @@ func HandlePerformance(s *discordgo.Session, i *discordgo.InteractionCreate, bot
 func getCurrentStats() map[string]interface{} {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	return map[string]interface{}{
-		"uptime_seconds":        0.0,
-		"command_count":         uint64(0),
-		"command_latency_us":    int64(0),
-		"event_count":           uint64(0),
-		"event_latency_us":      int64(0),
-		"rest_call_count":       uint64(0),
-		"rest_latency_ms":       int64(0),
-		"ws_latency_ms":         int64(0),
-		"goroutines":            runtime.NumGoroutine(),
-		"memory_alloc_mb":       m.Alloc / 1024 / 1024,
-		"memory_sys_mb":         m.Sys / 1024 / 1024,
-		"gc_count":              m.NumGC,
-		"cpu_cores":             runtime.NumCPU(),
+		"uptime_seconds":     0.0,
+		"command_count":      uint64(0),
+		"command_latency_us": int64(0),
+		"event_count":        uint64(0),
+		"event_latency_us":   int64(0),
+		"rest_call_count":    uint64(0),
+		"rest_latency_ms":    int64(0),
+		"ws_latency_ms":      int64(0),
+		"goroutines":         runtime.NumGoroutine(),
+		"memory_alloc_mb":    m.Alloc / 1024 / 1024,
+		"memory_sys_mb":      m.Sys / 1024 / 1024,
+		"gc_count":           m.NumGC,
+		"cpu_cores":          runtime.NumCPU(),
 	}
 }
 
@@ -125,19 +125,19 @@ func formatLatencyMetrics(stats map[string]interface{}) string {
 	restLatency := stats["rest_latency_ms"].(int64)
 	cmdLatency := stats["command_latency_us"].(int64)
 	eventLatency := stats["event_latency_us"].(int64)
-	
+
 	wsStatus := getStatusEmoji(wsLatency, 20, 10)
 	restStatus := getStatusEmoji(restLatency, 150, 100)
 	cmdStatus := getStatusEmoji(cmdLatency/1000, 5, 2)
 	eventStatus := getStatusEmoji(eventLatency/1000, 1, 1)
-	
+
 	return fmt.Sprintf(
 		"```"+
-		"WebSocket:     %3dms  %s  (Target: <20ms)\n"+
-		"REST API:      %3dms  %s  (Target: <150ms)\n"+
-		"Command Exec:  %.2fms %s  (Target: <5ms)\n"+
-		"Event Process: %.2fms %s  (Target: <1ms)"+
-		"```",
+			"WebSocket:     %3dms  %s  (Target: <20ms)\n"+
+			"REST API:      %3dms  %s  (Target: <150ms)\n"+
+			"Command Exec:  %.2fms %s  (Target: <5ms)\n"+
+			"Event Process: %.2fms %s  (Target: <1ms)"+
+			"```",
 		wsLatency, wsStatus,
 		restLatency, restStatus,
 		float64(cmdLatency)/1000.0, cmdStatus,
@@ -149,13 +149,13 @@ func formatThroughput(stats map[string]interface{}) string {
 	commandCount := stats["command_count"].(uint64)
 	eventCount := stats["event_count"].(uint64)
 	restCallCount := stats["rest_call_count"].(uint64)
-	
+
 	return fmt.Sprintf(
 		"```"+
-		"Commands:      %10d\n"+
-		"Events:        %10d\n"+
-		"REST Calls:    %10d"+
-		"```",
+			"Commands:      %10d\n"+
+			"Events:        %10d\n"+
+			"REST Calls:    %10d"+
+			"```",
 		commandCount, eventCount, restCallCount,
 	)
 }
@@ -165,26 +165,26 @@ func formatSystemResources(stats map[string]interface{}, m *runtime.MemStats) st
 	memSys := stats["memory_sys_mb"].(uint64)
 	goroutines := stats["goroutines"].(int)
 	gcCount := stats["gc_count"].(uint32)
-	
+
 	// Get actual memory limit from runtime
 	memLimit := debug.SetMemoryLimit(-1) / (1024 * 1024) // Convert to MB
 	memPercent := float64(memAlloc) / float64(memLimit) * 100
-	
+
 	memStatus := "🟢"
 	if memPercent > 80 {
 		memStatus = "🔴"
 	} else if memPercent > 60 {
 		memStatus = "🟡"
 	}
-	
+
 	return fmt.Sprintf(
 		"```"+
-		"Memory Alloc:  %5d MB  %s  (%.1f%% of %d MB)\n"+
-		"Memory Sys:    %5d MB\n"+
-		"Goroutines:    %5d\n"+
-		"GC Count:      %5d\n"+
-		"GC Pause:      %.2fms (last)"+
-		"```",
+			"Memory Alloc:  %5d MB  %s  (%.1f%% of %d MB)\n"+
+			"Memory Sys:    %5d MB\n"+
+			"Goroutines:    %5d\n"+
+			"GC Count:      %5d\n"+
+			"GC Pause:      %.2fms (last)"+
+			"```",
 		memAlloc, memStatus, memPercent, memLimit,
 		memSys,
 		goroutines,
@@ -200,16 +200,16 @@ func formatRuntimeConfig(m *runtime.MemStats) string {
 	gomaxprocs := runtime.GOMAXPROCS(0)
 	goVersion := runtime.Version()
 	memLimit := debug.SetMemoryLimit(-1) / (1024 * 1024 * 1024) // GB
-	
+
 	return fmt.Sprintf(
 		"```"+
-		"Go Version:    %s\n"+
-		"CPU Cores:     %d\n"+
-		"GOMAXPROCS:    %d\n"+
-		"GC Percent:    %d\n"+
-		"Memory Limit:  %d GB\n"+
-		"Platform:      %s/%s"+
-		"```",
+			"Go Version:    %s\n"+
+			"CPU Cores:     %d\n"+
+			"GOMAXPROCS:    %d\n"+
+			"GC Percent:    %d\n"+
+			"Memory Limit:  %d GB\n"+
+			"Platform:      %s/%s"+
+			"```",
 		goVersion,
 		numCPU,
 		gomaxprocs,
@@ -233,7 +233,7 @@ func formatDuration(d time.Duration) string {
 	hours := int(d.Hours()) % 24
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
-	
+
 	if days > 0 {
 		return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
 	} else if hours > 0 {

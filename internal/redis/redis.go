@@ -32,7 +32,7 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Network != "" {
 		network = cfg.Network
 	}
-	
+
 	// If addr looks like a socket path, automatically use unix
 	if len(cfg.Addr) > 0 && cfg.Addr[0] == '/' {
 		network = "unix"
