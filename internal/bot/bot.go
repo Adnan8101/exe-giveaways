@@ -9,6 +9,7 @@ import (
 	"discord-giveaway-bot/internal/services"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof" // Register pprof handlers
 	"os"
@@ -46,21 +47,27 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 
 	// Configure HTTP/2 keep-alive pooled transport for REST API
 	// ULTRA-OPTIMIZED: Target <100ms ban execution
+	// Use a pre-warmed connection pool
 	tr := &http.Transport{
-		MaxIdleConns:        500,  // Increased from 200
-		MaxIdleConnsPerHost: 100,  // Per-host connections
-		IdleConnTimeout:     120 * time.Second,
-		ForceAttemptHTTP2:   true, // HTTP/2 multiplexing
-		DisableCompression:  true, // Disable compression for speed (trade bandwidth for latency)
+		MaxIdleConns:        1000,              // Massive pool for instant availability
+		MaxIdleConnsPerHost: 200,               // Per-host connections
+		IdleConnTimeout:     300 * time.Second, // Keep connections alive longer
+		ForceAttemptHTTP2:   true,              // HTTP/2 multiplexing
+		DisableCompression:  true,              // Disable compression for speed (trade bandwidth for latency)
 		// TCP optimizations
 		DisableKeepAlives:     false,
-		MaxConnsPerHost:       100,
-		ResponseHeaderTimeout: 5 * time.Second,  // Reduced from 10s
-		TLSHandshakeTimeout:   5 * time.Second,  // Fast TLS handshake
-		ExpectContinueTimeout: 1 * time.Second,
+		MaxConnsPerHost:       200,
+		ResponseHeaderTimeout: 3 * time.Second, // Aggressive timeout
+		TLSHandshakeTimeout:   3 * time.Second, // Fast TLS handshake
+		ExpectContinueTimeout: 500 * time.Millisecond,
 		// Connection pooling settings
-		WriteBufferSize: 32 * 1024, // 32KB write buffer
-		ReadBufferSize:  32 * 1024, // 32KB read buffer
+		WriteBufferSize: 64 * 1024, // 64KB write buffer
+		ReadBufferSize:  64 * 1024, // 64KB read buffer
+		// Dial settings for faster connections
+		DialContext: (&net.Dialer{
+			Timeout:   3 * time.Second,
+			KeepAlive: 60 * time.Second,
+		}).DialContext,
 	}
 
 	s.Identify.Intents = discordgo.IntentsGuilds |
@@ -85,8 +92,14 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 			Base:    tr,
 			Monitor: perfMonitor,
 		},
-		Timeout: 15 * time.Second, // Reduced from 30s for faster failures
+		Timeout: 10 * time.Second, // Aggressive timeout for faster failures
 	}
+
+	// Pre-warm connections to Discord API
+	go func() {
+		// Make a dummy request to establish connection pool
+		_, _ = s.User("@me")
+	}()
 
 	// CRITICAL: Minimal state tracking for lowest overhead
 	// Only track what's essential for commands to work

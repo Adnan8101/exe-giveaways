@@ -75,21 +75,21 @@ func (pm *PerformanceMonitor) GetStats() map[string]interface{} {
 	runtime.ReadMemStats(&m)
 
 	return map[string]interface{}{
-		"uptime_seconds":      time.Since(pm.startTime).Seconds(),
-		"command_count":       pm.commandCount.Load(),
-		"command_latency_ns":  pm.commandLatency.Load(),
-		"event_count":         pm.eventCount.Load(),
-		"event_latency_ns":    pm.eventLatency.Load(),
-		"rest_call_count":     pm.restCallCount.Load(),
-		"rest_latency_ns":     pm.restLatency.Load(),
-		"ws_latency_ms":       pm.wsLatency.Load(),
-		"detection_count":     pm.detectionCount.Load(),
+		"uptime_seconds":       time.Since(pm.startTime).Seconds(),
+		"command_count":        pm.commandCount.Load(),
+		"command_latency_ns":   pm.commandLatency.Load(),
+		"event_count":          pm.eventCount.Load(),
+		"event_latency_ns":     pm.eventLatency.Load(),
+		"rest_call_count":      pm.restCallCount.Load(),
+		"rest_latency_ns":      pm.restLatency.Load(),
+		"ws_latency_ms":        pm.wsLatency.Load(),
+		"detection_count":      pm.detectionCount.Load(),
 		"detection_latency_ns": pm.detectionLatency.Load(),
-		"goroutines":          runtime.NumGoroutine(),
-		"memory_alloc_mb":     m.Alloc / 1024 / 1024,
-		"memory_sys_mb":       m.Sys / 1024 / 1024,
-		"gc_count":            m.NumGC,
-		"cpu_cores":           runtime.NumCPU(),
+		"goroutines":           runtime.NumGoroutine(),
+		"memory_alloc_mb":      m.Alloc / 1024 / 1024,
+		"memory_sys_mb":        m.Sys / 1024 / 1024,
+		"gc_count":             m.NumGC,
+		"cpu_cores":            runtime.NumCPU(),
 	}
 }
 

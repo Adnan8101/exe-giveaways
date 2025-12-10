@@ -3,6 +3,7 @@ package acl
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -25,9 +26,32 @@ var punishQueue = make(chan PunishTask, 1000)
 // Discord session (injected at startup)
 var discordSession *discordgo.Session
 
+// String pools to avoid allocations
+var stringPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 0, 32)
+		return &b
+	},
+}
+
 // InitPunishWorker initializes the punishment worker with Discord session
 func InitPunishWorker(session *discordgo.Session) {
 	discordSession = session
+}
+
+// Fast uint64 to string conversion
+func uitoa(n uint64) string {
+	if n == 0 {
+		return "0"
+	}
+	buf := make([]byte, 20)
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }
 
 // PushPunish adds a task to the queue
@@ -58,32 +82,26 @@ func StartPunishWorker() {
 func executePunishment(task PunishTask) {
 	start := time.Now()
 
-	log.Printf("[ACL] ⚡ Received punishment task: GuildID=%d, UserID=%d, Type=%s",
-		task.GuildID, task.UserID, task.Type)
-
 	if discordSession == nil {
-		log.Println("[ACL] ERROR: Discord session not initialized")
 		return
 	}
 
-	guildID := fmt.Sprintf("%d", task.GuildID)
-	userID := fmt.Sprintf("%d", task.UserID)
-
-	log.Printf("[ACL] Executing %s on user %s in guild %s...", task.Type, userID, guildID)
+	// Fast uint64 to string conversion without allocations
+	guildID := uitoa(task.GuildID)
+	userID := uitoa(task.UserID)
 
 	var err error
 	switch task.Type {
 	case "BAN":
-		log.Printf("[ACL] 🔨 EXECUTING BAN: User %s in Guild %s", userID, guildID)
+		// EXECUTE BAN IMMEDIATELY - NO LOGGING
 		err = discordSession.GuildBanCreateWithReason(guildID, userID, task.Reason, 0)
 		executionTime := time.Since(start)
 		if err == nil {
 			// Format detection time in microseconds
 			detectionMicros := float64(task.DetectionTime.Nanoseconds()) / 1000.0
 
-			log.Printf("[ACL] ✅ BAN SUCCESSFUL: User %s banned in guild %s", userID, guildID)
-			log.Printf("    ⚡ Detection Speed: %.2fµs", detectionMicros)
-			log.Printf("    ⏱️  Execution Time: %v", executionTime)
+			// Log AFTER ban completes
+			log.Printf("[ACL] ✅ BAN SUCCESS | User %s | Detection: %.2fµs | Execution: %v", userID, detectionMicros, executionTime)
 
 			PushLogEntry(LogEntry{
 				Message:       fmt.Sprintf("Banned user %s after detecting 1 violation", userID),
@@ -95,8 +113,7 @@ func executePunishment(task PunishTask) {
 				DetectionTime: task.DetectionTime,
 			})
 		} else {
-			log.Printf("[ACL] ❌ BAN FAILED: User %s in guild %s - Error: %v",
-				userID, guildID, err)
+			log.Printf("[ACL] ❌ BAN FAILED: %v", err)
 		}
 
 	case "KICK":

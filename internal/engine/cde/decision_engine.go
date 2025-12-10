@@ -12,10 +12,6 @@ var botUserID uint64
 // ProcessEvent is the hot-path function called by the consumer
 // CRITICAL: ZERO LOGGING IN THIS FUNCTION - EVERY NANOSECOND COUNTS
 func ProcessEvent(evt fdl.FastEvent) {
-	// Calculate detection speed (time from event start to processing)
-	detectionTime := time.Now().UnixNano() - evt.DetectionStart
-	detectionSpeed := time.Duration(detectionTime)
-
 	// ═══════════════════════════════════════════════════════════════════
 	// CRITICAL SAFETY CHECKS - MUST BE FIRST
 	// ═══════════════════════════════════════════════════════════════════
@@ -48,6 +44,10 @@ func ProcessEvent(evt fdl.FastEvent) {
 	// ═══════════════════════════════════════════════════════════════════
 	// END SAFETY CHECKS - PROCEED WITH DETECTION
 	// ═══════════════════════════════════════════════════════════════════
+
+	// Calculate detection speed AFTER safety checks (only for threats)
+	detectionTime := time.Now().UnixNano() - evt.DetectionStart
+	detectionSpeed := time.Duration(detectionTime)
 
 	// 2. Get User State
 	user := GetUser(evt.UserID)

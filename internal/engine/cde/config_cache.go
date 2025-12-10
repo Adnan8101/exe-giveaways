@@ -111,40 +111,31 @@ func IsAntiNukeEnabled(guildID uint64) bool {
 }
 
 // IsUserWhitelisted checks if a user is whitelisted for a guild
+// CRITICAL: Lock-free hot path
 func IsUserWhitelisted(guildID, userID uint64) bool {
 	idx := hashGuild(guildID)
-	configMutex.RLock()
-	defer configMutex.RUnlock()
-
 	guild := &GuildArena[idx]
-	if guild.GuildID != guildID {
+
+	// Quick ID check without lock
+	if atomic.LoadUint64(&guild.GuildID) != guildID {
 		return false
 	}
 
-	// Check TrustedUsers array (fast O(1) check for first 16)
-	// Optimize: Check Bitset first?
-	// Hash cost might be comparable to iterating 16 items.
-	// If we have 16 items, linear scan is ~10-20ns.
-	// Bitset check is ~3ns.
-
+	// Bitset check (lock-free)
 	h := hashUser(userID)
 	bitIdx := h % 256
 	wordIdx := bitIdx / 64
 	bitOffset := bitIdx % 64
 
-	// Atomic Load of the specific word in bitset
-	// But we can't easily address array element atomically via standard pkg without unsafe or helper
-	// or we just read it. Race is possible but updates are rare.
-	// Let's assume atomic coherence or use atomic.LoadUint64 if we want to be strict.
-	// &guild.TrustedBitset[wordIdx]
-
-	// For 3ns target, we do a relaxed read.
-	if (guild.TrustedBitset[wordIdx] & (1 << bitOffset)) == 0 {
-		return false // Definitely not whitelisted (assuming no false negatives in bloom/bitset)
+	// Read bitset word atomically
+	word := atomic.LoadUint64(&guild.TrustedBitset[wordIdx])
+	if (word & (1 << bitOffset)) == 0 {
+		return false // Definitely not whitelisted
 	}
 
-	// Bit is set: Possible match. Verify with exact IDs.
-	for _, trustedID := range guild.TrustedUsers {
+	// Bit is set: Verify with exact IDs (lock-free read)
+	for i := 0; i < 16; i++ {
+		trustedID := atomic.LoadUint64(&guild.TrustedUsers[i])
 		if trustedID == userID {
 			return true
 		}
@@ -168,14 +159,13 @@ func GetLogChannelID(guildID uint64) uint64 {
 }
 
 // GetGuildOwnerID returns the guild owner ID for a guild
+// CRITICAL: Lock-free hot path
 func GetGuildOwnerID(guildID uint64) uint64 {
 	idx := hashGuild(guildID)
-	configMutex.RLock()
-	defer configMutex.RUnlock()
-
 	guild := &GuildArena[idx]
-	if guild.GuildID == guildID {
-		return guild.OwnerID
+
+	if atomic.LoadUint64(&guild.GuildID) == guildID {
+		return atomic.LoadUint64(&guild.OwnerID)
 	}
 	return 0
 }
