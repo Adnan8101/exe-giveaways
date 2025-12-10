@@ -191,8 +191,9 @@ EOF
 fi
 
 if pm2 list | grep -q "$BOT_NAME"; then
-    echo -e "${CYAN}→ Restarting existing process...${NC}"
-    pm2 restart "$BOT_NAME"
+    echo -e "${CYAN}→ Restarting existing process (Clean Start)...${NC}"
+    pm2 delete "$BOT_NAME"
+    pm2 start "$PM2_CONFIG"
 else
     echo -e "${CYAN}→ Starting new process...${NC}"
     pm2 start "$PM2_CONFIG"

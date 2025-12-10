@@ -135,7 +135,11 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 		}
 
 		// 3. Check Role Whitelist
-		if member, err := d.session.State.Member(guildID, entry.UserID); err == nil {
+		member, err := d.session.State.Member(guildID, entry.UserID)
+		if err != nil {
+			member, err = d.session.GuildMember(guildID, entry.UserID)
+		}
+		if err == nil {
 			for _, roleID := range member.Roles {
 				if d.cache.IsWhitelisted(guildID, roleID) {
 					return
@@ -230,7 +234,11 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 
 	// Fast path 5: Role-based whitelist (check member roles)
 	// This adds ~1-2µs but necessary for role whitelisting
-	if member, err := d.session.State.Member(guildID, executorID); err == nil {
+	member, err := d.session.State.Member(guildID, executorID)
+	if err != nil {
+		member, err = d.session.GuildMember(guildID, executorID)
+	}
+	if err == nil {
 		for _, roleID := range member.Roles {
 			if d.cache.IsWhitelisted(guildID, roleID) {
 				// log.Printf("⏭️  [DETECTOR] User %s has whitelisted role %s, skipping", executorID, roleID)

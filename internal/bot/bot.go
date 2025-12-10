@@ -80,14 +80,14 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 
 	// CRITICAL: Minimal state tracking for lowest overhead
 	// Only track what's essential for commands to work
-	s.StateEnabled = true
-	s.State.TrackChannels = true
-	s.State.TrackEmojis = false
-	s.State.TrackMembers = true
-	s.State.TrackRoles = true
-	s.State.TrackVoice = true
-	s.State.TrackPresences = false
-	s.State.MaxMessageCount = 0 // CRITICAL: No message caching = lower latency
+	s.StateEnabled = false
+	// s.State.TrackChannels = true
+	// s.State.TrackEmojis = false
+	// s.State.TrackMembers = true
+	// s.State.TrackRoles = true
+	// s.State.TrackVoice = true
+	// s.State.TrackPresences = false
+	// s.State.MaxMessageCount = 0 // CRITICAL: No message caching = lower latency
 
 	// Performance optimizations
 	s.ShouldReconnectOnError = true
@@ -147,6 +147,15 @@ func (b *Bot) Start() error {
 	err := b.Session.Open()
 	if err != nil {
 		return err
+	}
+
+	// Ensure we have the bot user (since state is disabled)
+	if b.Session.State.User == nil {
+		u, err := b.Session.User("@me")
+		if err != nil {
+			return fmt.Errorf("failed to get bot user: %w", err)
+		}
+		b.Session.State.User = u
 	}
 
 	// Monitor WebSocket heartbeat latency every 30 seconds

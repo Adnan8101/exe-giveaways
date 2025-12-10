@@ -19,13 +19,18 @@ import (
 )
 
 func (b *Bot) Ready(s *discordgo.Session, r *discordgo.Ready) {
-	log.Printf("Logged in as: %v#%v", s.State.User.Username, s.State.User.Discriminator)
-	log.Printf("Serving %d guilds", len(s.State.Guilds))
+	// Manually populate state user since state tracking is disabled
+	if s.State.User == nil {
+		s.State.User = r.User
+	}
+
+	log.Printf("Logged in as: %v#%v", r.User.Username, r.User.Discriminator)
+	log.Printf("Serving %d guilds", len(r.Guilds))
 
 	// Register commands for each guild to ensure instant updates
 	log.Println("Registering guild commands...")
-	for _, guild := range s.State.Guilds {
-		_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, guild.ID, commands.Commands)
+	for _, guild := range r.Guilds {
+		_, err := s.ApplicationCommandBulkOverwrite(r.User.ID, guild.ID, commands.Commands)
 		if err != nil {
 			log.Printf("Failed to register commands for guild %s: %v", guild.ID, err)
 		} else {
