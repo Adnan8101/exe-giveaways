@@ -3,6 +3,7 @@ package acl
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"sync"
 	"time"
 
@@ -21,30 +22,31 @@ type PunishTask struct {
 
 // Buffered channel for tasks
 // This allows CDE to push without blocking unless buffer is full (Backpressure)
-// Size should be large enough to handle bursts
-var punishQueue = make(chan PunishTask, 1000)
+// Massively increased buffer size for extreme burst handling
+var punishQueue = make(chan PunishTask, 10000)
 
 // Discord session (injected at startup)
 var discordSession *discordgo.Session
 
 // Worker pool for parallel punishment execution
 var (
-	workerCount    = 50 // EXTREME worker pool for maximum parallel execution
+	workerCount    = 200 // MASSIVE worker pool for maximum parallel execution
 	workerPoolOnce sync.Once
+	fastBanQueue   = make(chan PunishTask, 5000) // Dedicated fast lane for bans
 )
 
-// String pools to avoid allocations
+// String pools to avoid allocations (expanded pool size)
 var stringPool = sync.Pool{
 	New: func() interface{} {
-		b := make([]byte, 0, 32)
+		b := make([]byte, 0, 64)
 		return &b
 	},
 }
 
-// Pre-allocated string buffers for ID conversion (per-worker)
+// Pre-allocated string buffers for ID conversion (per-worker) with larger capacity
 var idBufferPool = sync.Pool{
 	New: func() interface{} {
-		buf := make([]byte, 20)
+		buf := make([]byte, 32) // Increased size
 		return &buf
 	},
 }
@@ -86,16 +88,22 @@ func uitoa(n uint64) string {
 }
 
 // PushPunish adds a task to the queue
-// CRITICAL PATH: For BAN actions, execute IMMEDIATELY without queueing
+// ULTRA-OPTIMIZED: BAN actions use dedicated fast lane for minimum latency
 func PushPunish(task PunishTask) {
-	// EXTREME OPTIMIZATION: BAN actions bypass queue for minimum latency
+	// EXTREME OPTIMIZATION: BAN actions use dedicated high-priority queue
 	if task.Type == "BAN" {
-		// Execute ban IMMEDIATELY in current goroutine (no queue delay)
-		go executePunishmentDirect(task)
-		return
+		// Try fast lane first (non-blocking)
+		select {
+		case fastBanQueue <- task:
+			return
+		default:
+			// Fast lane full, execute immediately in goroutine
+			go executePunishmentDirect(task)
+			return
+		}
 	}
 
-	// Other punishment types use queue
+	// Other punishment types use standard queue
 	select {
 	case punishQueue <- task:
 	default:
@@ -108,11 +116,32 @@ func PushPunish(task PunishTask) {
 func StartPunishWorker() {
 	workerPoolOnce.Do(func() {
 		log.Printf("[ACL] Starting %d punishment workers...", workerCount)
-		for i := 0; i < workerCount; i++ {
-			go punishmentWorker(i)
+		
+		// Start dedicated fast ban workers (75% of pool for ban priority)
+		fastWorkerCount := (workerCount * 3) / 4
+		for i := 0; i < fastWorkerCount; i++ {
+			go fastBanWorker(i)
 		}
-		log.Printf("[ACL] ✅ All %d workers ready", workerCount)
+		
+		// Start standard workers for other punishment types
+		standardWorkerCount := workerCount - fastWorkerCount
+		for i := 0; i < standardWorkerCount; i++ {
+			go punishmentWorker(i + fastWorkerCount)
+		}
+		
+		log.Printf("[ACL] ✅ All %d workers ready (%d fast-ban, %d standard)", 
+			workerCount, fastWorkerCount, standardWorkerCount)
 	})
+}
+
+// fastBanWorker is a dedicated high-priority worker for ban actions
+func fastBanWorker(id int) {
+	runtime.LockOSThread() // Pin to OS thread for consistent performance
+	defer runtime.UnlockOSThread()
+	
+	for task := range fastBanQueue {
+		executePunishment(task)
+	}
 }
 
 // punishmentWorker is a dedicated goroutine that processes punishment tasks

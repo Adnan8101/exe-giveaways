@@ -37,22 +37,22 @@ type AttributionEngine struct {
 }
 
 const (
-	// DefaultBatchWindow is the time to wait before processing a batch of events
-	DefaultBatchWindow = 300 * time.Millisecond
+	// Ultra-aggressive batch window for faster attribution
+	DefaultBatchWindow = 100 * time.Millisecond
 
 	// MaxRetries for attribution attempts
-	MaxRetries = 3
+	MaxRetries = 5 // Increased retries
 
 	// RetryDelays for different event types
 	ImmediateRetry = 0 * time.Millisecond
-	ShortRetry     = 200 * time.Millisecond
-	LongRetry      = 400 * time.Millisecond
+	ShortRetry     = 100 * time.Millisecond
+	LongRetry      = 250 * time.Millisecond
 )
 
-// NewAttributionEngine creates a new attribution engine
+// NewAttributionEngine creates a new attribution engine with optimized settings
 func NewAttributionEngine(ringBuffer *ring.RingBuffer, auditCache *AuditCacheManager) *AttributionEngine {
 	return &AttributionEngine{
-		eventsChan:  make(chan *PendingEvent, 2048), // Buffered channel
+		eventsChan:  make(chan *PendingEvent, 8192), // Massively increased buffer
 		ringBuffer:  ringBuffer,
 		auditCache:  auditCache,
 		batchWindow: DefaultBatchWindow,
@@ -60,38 +60,47 @@ func NewAttributionEngine(ringBuffer *ring.RingBuffer, auditCache *AuditCacheMan
 	}
 }
 
-// Start begins the attribution engine processing loop
+// Start begins the attribution engine processing loop with parallelization
 func (a *AttributionEngine) Start() {
-	log.Println("[ATTRIBUTION] 🚀 Starting delayed attribution engine...")
+	log.Println("[ATTRIBUTION] 🚀 Starting ultra-fast parallel attribution engine...")
 	log.Printf("[ATTRIBUTION] Batch window: %v", a.batchWindow)
+	log.Println("[ATTRIBUTION] Using parallel batch processing for maximum throughput")
 
 	a.ticker = time.NewTicker(a.batchWindow)
 
-	go func() {
-		var batch []*PendingEvent
-		batch = make([]*PendingEvent, 0, 256)
+	// Start multiple worker goroutines for parallel processing
+	numWorkers := 4 // Parallel attribution workers
+	for i := 0; i < numWorkers; i++ {
+		go a.attributionWorker(i)
+	}
 
-		for {
-			select {
-			case evt := <-a.eventsChan:
-				batch = append(batch, evt)
-				if len(batch) >= 200 { // Early flush if batch is full
-					a.processBatch(batch)
-					batch = batch[:0]
-				}
-			case <-a.ticker.C:
-				if len(batch) > 0 {
-					a.processBatch(batch)
-					batch = batch[:0]
-				}
-			case <-a.stopChan:
-				log.Println("[ATTRIBUTION] Stopping attribution engine...")
-				return
+	log.Printf("[ATTRIBUTION] ✅ Attribution engine started with %d parallel workers", numWorkers)
+}
+
+// attributionWorker processes attribution in parallel
+func (a *AttributionEngine) attributionWorker(id int) {
+	batch := make([]*PendingEvent, 0, 512)
+	
+	for {
+		select {
+		case evt := <-a.eventsChan:
+			batch = append(batch, evt)
+			if len(batch) >= 400 { // Early flush if batch is full
+				a.processBatch(batch)
+				batch = batch[:0]
 			}
+		case <-a.ticker.C:
+			if len(batch) > 0 {
+				a.processBatch(batch)
+				batch = batch[:0]
+			}
+		case <-a.stopChan:
+			if len(batch) > 0 {
+				a.processBatch(batch)
+			}
+			return
 		}
-	}()
-
-	log.Println("[ATTRIBUTION] ✅ Attribution engine started")
+	}
 }
 
 // Stop stops the attribution engine
