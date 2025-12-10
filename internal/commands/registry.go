@@ -34,6 +34,7 @@ var Commands = []*discordgo.ApplicationCommand{
 	Help,
 	Ping,
 	Stats,
+	PerformanceCommand, // Performance monitoring
 	// Voice Commands
 	voice.WhereVoice,
 	voice.Drag,

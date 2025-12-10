@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ type Config struct {
 	Addr     string `json:"addr"`
 	Password string `json:"password"`
 	DB       int    `json:"db"`
+	Network  string `json:"network"` // "tcp" or "unix" for socket path
 }
 
 type Client struct {
@@ -25,19 +27,43 @@ type Client struct {
 var ctx = context.Background()
 
 func New(cfg Config) (*Client, error) {
-	rdb := redis.NewClient(&redis.Options{
+	// Determine network type - use Unix socket for local Redis (microsecond latency)
+	network := "tcp"
+	if cfg.Network != "" {
+		network = cfg.Network
+	}
+	
+	// If addr looks like a socket path, automatically use unix
+	if len(cfg.Addr) > 0 && cfg.Addr[0] == '/' {
+		network = "unix"
+	}
+
+	opts := &redis.Options{
 		Addr:     cfg.Addr,
 		Password: cfg.Password,
 		DB:       cfg.DB,
+		Network:  network,
 		// Connection pool settings for high performance
 		PoolSize:     100, // Increased from default 10
 		MinIdleConns: 20,  // Keep connections warm
 		MaxRetries:   3,   // Retry failed commands
 		PoolTimeout:  4 * time.Second,
-	})
+		// Performance optimizations
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
+	}
+
+	rdb := redis.NewClient(opts)
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to redis: %w", err)
+	}
+
+	if network == "unix" {
+		log.Println("✓ Redis connected via Unix socket (microsecond latency)")
+	} else {
+		log.Println("✓ Redis connected via TCP")
 	}
 
 	return &Client{client: rdb}, nil

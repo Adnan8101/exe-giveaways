@@ -93,6 +93,8 @@ func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			commands.HandlePing(s, i, b.DB, b.Redis)
 		case "stats":
 			commands.HandleStats(s, i, b.StartTime)
+		case "performance":
+			commands.HandlePerformance(s, i, b)
 		// AntiNuke Commands
 		case "panic_mode":
 			antinuke.HandlePanicMode(s, i, b.DB)

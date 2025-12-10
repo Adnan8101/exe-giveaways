@@ -146,7 +146,7 @@ func (d *Detector) ProcessEventWithGuild(guildID string, entry *discordgo.AuditL
 		// 4. EXECUTE BAN IMMEDIATELY - SYNCHRONOUSLY (NO GOROUTINE)
 		detectionLatency := time.Since(start)
 		pStart := time.Now()
-		
+
 		// BAN FIRST - BLOCKING - FASTEST POSSIBLE
 		d.session.GuildBanCreateWithReason(guildID, entry.UserID, "AntiNuke: Panic Mode Violation", 0)
 		punishmentLatency := time.Since(pStart)
