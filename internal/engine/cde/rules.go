@@ -60,8 +60,8 @@ func EvaluateRules(evt fdl.FastEvent, user *UserInfo) (bool, string) {
 	if user.RoleDelCount >= 1 {
 		return true, "BAN" // 1 role delete = instant trigger
 	}
-	if user.KickCount >= 2 {
-		return true, "BAN" // 2 kicks = instant trigger
+	if user.KickCount >= 1 {
+		return true, "BAN" // 1 kick = instant trigger
 	}
 
 	return false, ""

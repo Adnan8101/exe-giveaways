@@ -3,11 +3,12 @@ package fdl
 // FastEvent is the normalized event structure that fits in a cache line
 // It is 32-40 bytes depending on alignment
 type FastEvent struct {
-	ReqType   uint8  // 1 byte: Internal Enum (e.g., EvtChannelDelete)
-	GuildID   uint64 // 8 bytes: Snowflake
-	UserID    uint64 // 8 bytes: Snowflake
-	EntityID  uint64 // 8 bytes: Target ID (Role/Channel/User)
-	Timestamp int64  // 8 bytes: Monotonic nanoseconds
+	ReqType        uint8  // 1 byte: Internal Enum (e.g., EvtChannelDelete)
+	GuildID        uint64 // 8 bytes: Snowflake
+	UserID         uint64 // 8 bytes: Snowflake
+	EntityID       uint64 // 8 bytes: Target ID (Role/Channel/User)
+	Timestamp      int64  // 8 bytes: Monotonic nanoseconds
+	DetectionStart int64  // 8 bytes: Start time for detection speed measurement
 }
 
 // Event Types (uint8)

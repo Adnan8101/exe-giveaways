@@ -10,10 +10,11 @@ import (
 
 // PunishTask represents an action to be taken via Discord API
 type PunishTask struct {
-	GuildID uint64
-	UserID  uint64
-	Type    string
-	Reason  string
+	GuildID       uint64
+	UserID        uint64
+	Type          string
+	Reason        string
+	DetectionTime time.Duration // Time taken to detect the violation
 }
 
 // Buffered channel for tasks
@@ -75,16 +76,23 @@ func executePunishment(task PunishTask) {
 	case "BAN":
 		log.Printf("[ACL] 🔨 EXECUTING BAN: User %s in Guild %s", userID, guildID)
 		err = discordSession.GuildBanCreateWithReason(guildID, userID, task.Reason, 0)
+		executionTime := time.Since(start)
 		if err == nil {
-			log.Printf("[ACL] ✅ BAN SUCCESSFUL: User %s banned in guild %s (took %v)",
-				userID, guildID, time.Since(start))
+			// Format detection time in microseconds
+			detectionMicros := float64(task.DetectionTime.Nanoseconds()) / 1000.0
+
+			log.Printf("[ACL] ✅ BAN SUCCESSFUL: User %s banned in guild %s", userID, guildID)
+			log.Printf("    ⚡ Detection Speed: %.2fµs", detectionMicros)
+			log.Printf("    ⏱️  Execution Time: %v", executionTime)
+
 			PushLogEntry(LogEntry{
-				Message: fmt.Sprintf("Banned user %s", userID),
-				Level:   "critical",
-				GuildID: guildID,
-				UserID:  userID,
-				Action:  "BAN",
-				Latency: time.Since(start),
+				Message:       fmt.Sprintf("Banned user %s after detecting 1 violation", userID),
+				Level:         "critical",
+				GuildID:       guildID,
+				UserID:        userID,
+				Action:        "BAN",
+				Latency:       executionTime,
+				DetectionTime: task.DetectionTime,
 			})
 		} else {
 			log.Printf("[ACL] ❌ BAN FAILED: User %s in guild %s - Error: %v",

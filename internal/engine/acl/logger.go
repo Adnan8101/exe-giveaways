@@ -22,13 +22,14 @@ var (
 
 // LogEntry represents a single log entry
 type LogEntry struct {
-	Message   string
-	Level     string // "info", "warn", "error", "critical"
-	Timestamp time.Time
-	GuildID   string
-	UserID    string
-	Action    string
-	Latency   time.Duration
+	Message       string
+	Level         string // "info", "warn", "error", "critical"
+	Timestamp     time.Time
+	GuildID       string
+	UserID        string
+	Action        string
+	Latency       time.Duration
+	DetectionTime time.Duration // Time taken to detect the violation
 }
 
 // InitLogger initializes the logger with Discord session
@@ -90,9 +91,16 @@ func StartLogger() {
 
 			// Console output (always)
 			for _, entry := range batch {
-				fmt.Printf("[%s] %s | %s | Latency: %v\n",
-					entry.Level, entry.Timestamp.Format("15:04:05.000"),
-					entry.Message, entry.Latency)
+				if entry.DetectionTime > 0 {
+					detectionMicros := float64(entry.DetectionTime.Nanoseconds()) / 1000.0
+					fmt.Printf("[%s] %s | %s | Detection: %.2fµs | Execution: %v\n",
+						entry.Level, entry.Timestamp.Format("15:04:05.000"),
+						entry.Message, detectionMicros, entry.Latency)
+				} else {
+					fmt.Printf("[%s] %s | %s | Latency: %v\n",
+						entry.Level, entry.Timestamp.Format("15:04:05.000"),
+						entry.Message, entry.Latency)
+				}
 			}
 
 			// Discord output (if configured)
@@ -156,7 +164,10 @@ func sendToChannel(channelID string, entries []LogEntry) {
 		}
 		emoji := getEmojiForLevel(entry.Level)
 		description.WriteString(fmt.Sprintf("%s **%s** | %s", emoji, entry.Action, entry.Message))
-		if entry.Latency > 0 {
+		if entry.DetectionTime > 0 {
+			detectionMicros := float64(entry.DetectionTime.Nanoseconds()) / 1000.0
+			description.WriteString(fmt.Sprintf(" `[Detection: %.2fµs, Execution: %v]`", detectionMicros, entry.Latency))
+		} else if entry.Latency > 0 {
 			description.WriteString(fmt.Sprintf(" `[%v]`", entry.Latency))
 		}
 		description.WriteString("\n")

@@ -92,11 +92,12 @@ func (h *EventHandlers) OnChannelCreate(s *discordgo.Session, e *discordgo.Chann
 
 	// Create FastEvent
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtChannelCreate,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.ID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtChannelCreate,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.ID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	// Push to ring buffer
@@ -131,11 +132,12 @@ func (h *EventHandlers) OnChannelDelete(s *discordgo.Session, e *discordgo.Chann
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtChannelDelete,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.ID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtChannelDelete,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.ID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -166,11 +168,12 @@ func (h *EventHandlers) OnChannelUpdate(s *discordgo.Session, e *discordgo.Chann
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtChannelUpdate,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.ID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtChannelUpdate,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.ID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -201,11 +204,12 @@ func (h *EventHandlers) OnRoleCreate(s *discordgo.Session, e *discordgo.GuildRol
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtRoleCreate,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.Role.ID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtRoleCreate,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.Role.ID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -233,11 +237,12 @@ func (h *EventHandlers) OnRoleDelete(s *discordgo.Session, e *discordgo.GuildRol
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtRoleDelete,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.RoleID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtRoleDelete,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.RoleID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -264,11 +269,12 @@ func (h *EventHandlers) OnRoleUpdate(s *discordgo.Session, e *discordgo.GuildRol
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtRoleUpdate,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.Role.ID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtRoleUpdate,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.Role.ID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -299,11 +305,12 @@ func (h *EventHandlers) OnGuildBanAdd(s *discordgo.Session, e *discordgo.GuildBa
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtGuildBanAdd,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.User.ID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtGuildBanAdd,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.User.ID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -333,11 +340,12 @@ func (h *EventHandlers) OnGuildMemberRemove(s *discordgo.Session, e *discordgo.G
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtGuildMemberRemove,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.User.ID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtGuildMemberRemove,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.User.ID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -368,11 +376,12 @@ func (h *EventHandlers) OnWebhooksUpdate(s *discordgo.Session, e *discordgo.Webh
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtWebhookCreate,
-		GuildID:   parseSnowflake(e.GuildID),
-		UserID:    userID,
-		EntityID:  parseSnowflake(e.ChannelID),
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtWebhookCreate,
+		GuildID:        parseSnowflake(e.GuildID),
+		UserID:         userID,
+		EntityID:       parseSnowflake(e.ChannelID),
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {
@@ -398,11 +407,12 @@ func (h *EventHandlers) OnGuildUpdate(s *discordgo.Session, e *discordgo.GuildUp
 	}
 
 	evt := &fdl.FastEvent{
-		ReqType:   fdl.EvtGuildUpdate,
-		GuildID:   parseSnowflake(e.ID),
-		UserID:    userID,
-		EntityID:  0,
-		Timestamp: time.Now().UnixNano(),
+		ReqType:        fdl.EvtGuildUpdate,
+		GuildID:        parseSnowflake(e.ID),
+		UserID:         userID,
+		EntityID:       0,
+		Timestamp:      time.Now().UnixNano(),
+		DetectionStart: start.UnixNano(),
 	}
 
 	if !h.eventRing.Push(evt) {

@@ -4,6 +4,7 @@ import (
 	"discord-giveaway-bot/internal/engine/acl"
 	"discord-giveaway-bot/internal/engine/fdl"
 	"log"
+	"time"
 )
 
 // Bot user ID (set during initialization) - NEVER punish this user
@@ -13,6 +14,10 @@ var botUserID uint64
 func ProcessEvent(evt fdl.FastEvent) {
 	// DEBUG: Log all events being processed
 	log.Printf("[CDE] Processing event: Type=%d, GuildID=%d, UserID=%d", evt.ReqType, evt.GuildID, evt.UserID)
+
+	// Calculate detection speed (time from event start to processing)
+	detectionTime := time.Now().UnixNano() - evt.DetectionStart
+	detectionSpeed := time.Duration(detectionTime)
 
 	// ═══════════════════════════════════════════════════════════════════
 	// CRITICAL SAFETY CHECKS - MUST BE FIRST
@@ -56,21 +61,22 @@ func ProcessEvent(evt fdl.FastEvent) {
 	// 3. Evaluate Rules
 	punish, pType := EvaluateRules(evt, user)
 
-	// DEBUG: Log evaluation result
-	log.Printf("[CDE] Evaluation: UserID=%d, ThreatScore=%d, Punish=%v, Type=%s",
-		evt.UserID, user.ThreatScore, punish, pType)
+	// DEBUG: Log evaluation result with detection speed
+	log.Printf("[CDE] Evaluation: UserID=%d, ThreatScore=%d, Punish=%v, Type=%s, DetectionSpeed=%v",
+		evt.UserID, user.ThreatScore, punish, pType, detectionSpeed)
 
 	// 4. Execute Punishment
 	if punish {
-		log.Printf("[CDE] 🚨 TRIGGERING PUNISHMENT: UserID=%d, Type=%s, Reason=Anti-Nuke",
-			evt.UserID, pType)
+		log.Printf("[CDE] 🚨 TRIGGERING PUNISHMENT: UserID=%d, Type=%s, Reason=Anti-Nuke, DetectionSpeed=%v",
+			evt.UserID, pType, detectionSpeed)
 
 		// Create Async Task
 		task := acl.PunishTask{
-			GuildID: evt.GuildID,
-			UserID:  evt.UserID,
-			Type:    pType,
-			Reason:  "Anti-Nuke Detection System - PANIC MODE",
+			GuildID:       evt.GuildID,
+			UserID:        evt.UserID,
+			Type:          pType,
+			Reason:        "Anti-Nuke Detection System - PANIC MODE",
+			DetectionTime: detectionSpeed,
 		}
 
 		// Push to ACL Queue
