@@ -29,6 +29,17 @@ type Config struct {
 }
 
 func main() {
+	// CRITICAL: Panic recovery to prevent silent crashes
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ FATAL PANIC: %v", r)
+			log.Printf("Stack trace:\n%s", debug.Stack())
+			os.Exit(1)
+		}
+	}()
+
+	log.Println("🚀 Starting Discord Giveaway Bot...")
+
 	// CRITICAL Performance optimizations for low latency
 	numCPU := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCPU) // Use all available CPU cores
@@ -42,42 +53,56 @@ func main() {
 	memoryLimit := int64(3 * 1024 * 1024 * 1024) // 3GB limit (leave 1GB for OS)
 	debug.SetMemoryLimit(memoryLimit)
 
-	log.Println("🚀 Runtime optimized for low latency:")
+	log.Println("⚙️  Runtime optimized for low latency:")
 	log.Printf("   • GOMAXPROCS: %d cores", numCPU)
 	log.Printf("   • GC Percent: %d (reduced GC frequency)", gcPercent)
 	log.Printf("   • Memory Limit: %d MB", memoryLimit/(1024*1024))
 
 	// Load config
+	log.Println("📄 Loading config.json...")
 	file, err := os.ReadFile("config.json")
 	if err != nil {
-		log.Fatalf("Error reading config.json: %v", err)
+		log.Fatalf("❌ Error reading config.json: %v", err)
 	}
 
 	var config Config
 	if err := json.Unmarshal(file, &config); err != nil {
-		log.Fatalf("Error parsing config.json: %v", err)
+		log.Fatalf("❌ Error parsing config.json: %v", err)
 	}
+
+	// Validate token
+	if config.Token == "" {
+		log.Fatal("❌ Discord token is empty in config.json")
+	}
+	log.Println("✓ Config loaded successfully")
 
 	// Initialize Redis
+	log.Println("📦 Connecting to Redis...")
 	rdb, err := redis.New(config.Redis)
 	if err != nil {
-		log.Fatalf("Error initializing Redis: %v", err)
+		log.Fatalf("❌ Error initializing Redis: %v", err)
 	}
+	log.Println("✓ Redis connected")
 
 	// Initialize Database
+	log.Println("🗄️  Connecting to PostgreSQL...")
 	db, err := database.NewDatabase(config.Postgres)
 	if err != nil {
-		log.Fatalf("Error initializing Database: %v", err)
+		log.Fatalf("❌ Error initializing Database: %v", err)
 	}
+	log.Println("✓ Database connected")
 
 	// =========================================================================
 	// HIGH-PERFORMANCE ENGINE INITIALIZATION
 	// =========================================================================
+	log.Println("🔧 Initializing High-Performance Engine...")
 
 	// 1. Initialize Ring Buffer (The Highway)
+	log.Println("   • Ring Buffer...")
 	eventRing := ring.New()
 
 	// 2. Start ACL Workers (The Async Executors)
+	log.Println("   • ACL Workers...")
 	acl.StartPunishWorker()
 	acl.StartLogger()
 
@@ -88,6 +113,7 @@ func main() {
 		numWorkers = 2
 	}
 
+	log.Printf("   • Starting %d CDE Workers...", numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		worker := ring.Consumer{
 			Ring:    eventRing,
@@ -98,6 +124,7 @@ func main() {
 	}
 
 	// 4. Start Time Ticker (1ms resolution) for zero-syscall time
+	log.Println("   • Time Ticker (1ms)...")
 	go func() {
 		ticker := time.NewTicker(1 * time.Millisecond)
 		for range ticker.C {
@@ -105,13 +132,17 @@ func main() {
 		}
 	}()
 
+	log.Println("✓ Engine initialization complete")
+
 	// =========================================================================
 
 	// Initialize bot
+	log.Println("🤖 Initializing Bot Session...")
 	b, err := bot.New(config.Token, db, rdb)
 	if err != nil {
-		log.Fatalf("Error initializing bot: %v", err)
+		log.Fatalf("❌ Error initializing bot: %v", err)
 	}
+	log.Println("✓ Bot session created")
 
 	// =========================================================================
 	// WIRE ENGINE TO DISCORD SESSION
@@ -151,16 +182,26 @@ func main() {
 		if len(e.RawData) == 0 {
 			return
 		}
+
+		log.Printf("[MAIN] Received gateway event: Type=%s, Size=%d bytes", e.Type, len(e.RawData))
+
 		fastEvt, err := fdl.ParseFrame(e.RawData)
 		if err != nil {
+			log.Printf("[MAIN] Failed to parse event: %v", err)
 			return // Malformed or irrelevant event
 		}
 		if fastEvt != nil {
+			log.Printf("[MAIN] ✓ Parsed event: Type=%d, GuildID=%d, UserID=%d - Pushing to ring buffer",
+				fastEvt.ReqType, fastEvt.GuildID, fastEvt.UserID)
 			if !eventRing.Push(fastEvt) {
 				fdl.EventsDropped.Inc(0) // Increment dropped counter if buffer is full
+				log.Printf("[MAIN] ❌ Ring buffer full, event dropped!")
 			} else {
 				fdl.EventsProcessed.Inc(fastEvt.UserID) // Tentative count
+				log.Printf("[MAIN] ✓ Event pushed to ring buffer successfully")
 			}
+		} else {
+			log.Printf("[MAIN] Event parsed but fastEvt is nil (unknown/ignored event type)")
 		}
 
 		// Track high-res latency in PerfMonitor

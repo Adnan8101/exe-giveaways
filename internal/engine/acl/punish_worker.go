@@ -57,6 +57,9 @@ func StartPunishWorker() {
 func executePunishment(task PunishTask) {
 	start := time.Now()
 
+	log.Printf("[ACL] ⚡ Received punishment task: GuildID=%d, UserID=%d, Type=%s",
+		task.GuildID, task.UserID, task.Type)
+
 	if discordSession == nil {
 		log.Println("[ACL] ERROR: Discord session not initialized")
 		return
@@ -65,11 +68,16 @@ func executePunishment(task PunishTask) {
 	guildID := fmt.Sprintf("%d", task.GuildID)
 	userID := fmt.Sprintf("%d", task.UserID)
 
+	log.Printf("[ACL] Executing %s on user %s in guild %s...", task.Type, userID, guildID)
+
 	var err error
 	switch task.Type {
 	case "BAN":
+		log.Printf("[ACL] 🔨 EXECUTING BAN: User %s in Guild %s", userID, guildID)
 		err = discordSession.GuildBanCreateWithReason(guildID, userID, task.Reason, 0)
 		if err == nil {
+			log.Printf("[ACL] ✅ BAN SUCCESSFUL: User %s banned in guild %s (took %v)",
+				userID, guildID, time.Since(start))
 			PushLogEntry(LogEntry{
 				Message: fmt.Sprintf("Banned user %s", userID),
 				Level:   "critical",
@@ -78,6 +86,9 @@ func executePunishment(task PunishTask) {
 				Action:  "BAN",
 				Latency: time.Since(start),
 			})
+		} else {
+			log.Printf("[ACL] ❌ BAN FAILED: User %s in guild %s - Error: %v",
+				userID, guildID, err)
 		}
 
 	case "KICK":

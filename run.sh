@@ -170,7 +170,7 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "${BLUE}[STEP 5] Deploying with PM2...${NC}"
 
-# Ensure ecosystem.config.js exists
+# Ensure ecosystem.config.js exists with enhanced logging configuration
 if [ ! -f "$PM2_CONFIG" ]; then
     echo -e "${CYAN}→ Creating $PM2_CONFIG...${NC}"
     cat > "$PM2_CONFIG" <<EOF
@@ -179,9 +179,14 @@ module.exports = {
     name: '$BOT_NAME',
     script: './$BOT_NAME',
     instances: 1,
-    autorestart: true,
+    autorestart: false,  // Disabled to prevent restart loops during debugging
     watch: false,
     max_memory_restart: '2G',
+    kill_timeout: 5000,
+    error_file: './logs/error.log',
+    out_file: './logs/out.log',
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    merge_logs: true,
     env: {
       NODE_ENV: 'production'
     }
@@ -190,32 +195,69 @@ module.exports = {
 EOF
 fi
 
+# Create logs directory
+mkdir -p logs
+
 if pm2 list | grep -q "$BOT_NAME"; then
     echo -e "${CYAN}→ Restarting existing process (Clean Start)...${NC}"
     pm2 delete "$BOT_NAME"
-    pm2 start "$PM2_CONFIG"
-else
-    echo -e "${CYAN}→ Starting new process...${NC}"
-    pm2 start "$PM2_CONFIG"
+    sleep 1
 fi
+
+echo -e "${CYAN}→ Starting new process...${NC}"
+pm2 start "$PM2_CONFIG"
 
 pm2 save > /dev/null 2>&1
 
 # ------------------------------------------------------------------------------
-# 6. STATUS & LATENCY
+# 6. HEALTH CHECK & VERIFICATION
 # ------------------------------------------------------------------------------
-echo -e "${BLUE}[STEP 6] Status Check...${NC}"
-sleep 2
-pm2 status "$BOT_NAME"
+echo -e "${BLUE}[STEP 6] Verifying Bot Health...${NC}"
+echo -e "${CYAN}→ Waiting 3 seconds for initialization...${NC}"
+sleep 3
 
-echo -e "${CYAN}→ Checking Discord Gateway Latency...${NC}"
-PING=$(ping -c 3 gateway.discord.gg 2>/dev/null | tail -1 | awk -F '/' '{print $5}')
-if [ ! -z "$PING" ]; then
-    echo -e "   Gateway Ping: ${GREEN}${PING}ms${NC}"
+# Check if bot is still running
+if pm2 list | grep -q "$BOT_NAME.*online"; then
+    echo -e "${GREEN}✓ Bot is running${NC}"
+    pm2 status "$BOT_NAME"
+    
+    echo ""
+    echo -e "${CYAN}→ Streaming bot logs (Ctrl+C to stop)...${NC}"
+    echo -e "${YELLOW}   Watch for initialization messages and errors below:${NC}"
+    echo ""
+    sleep 1
+    
+    # Stream logs for 10 seconds to show initialization
+    timeout 10 pm2 logs "$BOT_NAME" --lines 50 || true
+    
+    echo ""
+    echo -e "${GREEN}🎉 DONE! Bot appears to be running.${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "   ${BLUE}Useful Commands:${NC}"
+    echo -e "   • View live logs:    ${CYAN}pm2 logs $BOT_NAME${NC}"
+    echo -e "   • Check status:      ${CYAN}pm2 status${NC}"
+    echo -e "   • Restart bot:       ${CYAN}pm2 restart $BOT_NAME${NC}"
+    echo -e "   • Stop bot:          ${CYAN}pm2 stop $BOT_NAME${NC}"
+    echo -e "   • View error logs:   ${CYAN}cat logs/error.log${NC}"
+    echo -e "   • View output logs:  ${CYAN}cat logs/out.log${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 else
-    echo -e "   Gateway Ping: ${YELLOW}Failed${NC}"
+    echo -e "${RED}❌ Bot crashed or failed to start!${NC}"
+    echo ""
+    echo -e "${YELLOW}Troubleshooting Steps:${NC}"
+    echo -e "1. Check error logs:     ${CYAN}cat logs/error.log${NC}"
+    echo -e "2. Check output logs:    ${CYAN}cat logs/out.log${NC}"
+    echo -e "3. View PM2 logs:        ${CYAN}pm2 logs $BOT_NAME --lines 100${NC}"
+    echo ""
+    echo -e "${YELLOW}Common Issues:${NC}"
+    echo -e "• Invalid bot token in config.json"
+    echo -e "• Redis not running: ${CYAN}systemctl status redis-server${NC}"
+    echo -e "• PostgreSQL connection failed"
+    echo -e "• Missing dependencies"
+    echo ""
+    echo -e "${CYAN}Recent error logs:${NC}"
+    tail -n 20 logs/error.log 2>/dev/null || echo "No error logs found"
+    echo ""
+    exit 1
 fi
-
-echo -e "${GREEN}🎉 DONE! Bot is running.${NC}"
-echo -e "   View logs: ${CYAN}pm2 logs $BOT_NAME${NC}"
 

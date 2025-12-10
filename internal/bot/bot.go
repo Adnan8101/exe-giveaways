@@ -147,17 +147,29 @@ func (b *Bot) Start() error {
 
 	err := b.Session.Open()
 	if err != nil {
-		return err
+		log.Printf("❌ Failed to connect to Discord Gateway: %v", err)
+		log.Println("   Common causes:")
+		log.Println("   • Invalid bot token in config.json")
+		log.Println("   • Network connectivity issues")
+		log.Println("   • Discord API outage")
+		return fmt.Errorf("gateway connection failed: %w", err)
 	}
+	log.Println("✓ Connected to Discord Gateway")
 
 	// Ensure we have the bot user (since state is disabled)
+	log.Println("🤖 Fetching bot user info...")
 	if b.Session.State.User == nil {
 		u, err := b.Session.User("@me")
 		if err != nil {
+			log.Printf("❌ Failed to fetch bot user: %v", err)
 			return fmt.Errorf("failed to get bot user: %w", err)
 		}
 		b.Session.State.User = u
 	}
+	log.Printf("✓ Logged in as: %s#%s (ID: %s)",
+		b.Session.State.User.Username,
+		b.Session.State.User.Discriminator,
+		b.Session.State.User.ID)
 
 	// Monitor WebSocket heartbeat latency every 30 seconds
 	go b.monitorHeartbeat()

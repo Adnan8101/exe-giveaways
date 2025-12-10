@@ -2,13 +2,13 @@ package cde
 
 import "discord-giveaway-bot/internal/engine/fdl"
 
-// Rules constants
+// Rules constants - PANIC MODE: INSTANT DETECTION
 const (
-	ScoreThreshold = 100
-	MetricBan      = 20
-	MetricKick     = 10
-	MetricChanDel  = 25
-	MetricRoleDel  = 25
+	ScoreThreshold = 20 // Lowered from 100 - instant trigger
+	MetricBan      = 25 // Higher weight for bans
+	MetricKick     = 15 // Higher weight for kicks
+	MetricChanDel  = 30 // 1 channel delete = instant ban
+	MetricRoleDel  = 30 // 1 role delete = instant ban
 )
 
 // EvaluateRules checks the event against the user state and returns a punishment if needed
@@ -50,12 +50,18 @@ func EvaluateRules(evt fdl.FastEvent, user *UserInfo) (bool, string) {
 		return true, "BAN"
 	}
 
-	// Hard Limits (Instant Triggers)
-	if user.BanCount >= 3 {
-		return true, "BAN"
+	// Hard Limits (Instant Triggers) - PANIC MODE
+	if user.BanCount >= 1 {
+		return true, "BAN" // 1 ban = instant trigger
 	}
-	if user.ChanDelCount >= 3 {
-		return true, "BAN"
+	if user.ChanDelCount >= 1 {
+		return true, "BAN" // 1 channel delete = instant trigger
+	}
+	if user.RoleDelCount >= 1 {
+		return true, "BAN" // 1 role delete = instant trigger
+	}
+	if user.KickCount >= 2 {
+		return true, "BAN" // 2 kicks = instant trigger
 	}
 
 	return false, ""
