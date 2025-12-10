@@ -11,11 +11,12 @@ import (
 
 // PunishTask represents an action to be taken via Discord API
 type PunishTask struct {
-	GuildID       uint64
-	UserID        uint64
-	Type          string
-	Reason        string
-	DetectionTime time.Duration // Time taken to detect the violation
+	GuildID        uint64
+	UserID         uint64
+	Type           string
+	Reason         string
+	DetectionTime  time.Duration // Time taken to detect the violation
+	DetectionStart time.Time     // When detection started (for total latency tracking)
 }
 
 // Buffered channel for tasks
@@ -93,17 +94,31 @@ func executePunishment(task PunishTask) {
 	var err error
 	switch task.Type {
 	case "BAN":
-		// EXECUTE BAN IMMEDIATELY - NO LOGGING
+		// EXECUTE BAN IMMEDIATELY - NO BLOCKING
 		err = discordSession.GuildBanCreateWithReason(guildID, userID, task.Reason, 0)
 		executionTime := time.Since(start)
+		
+		// Format detection time in microseconds
+		detectionMicros := float64(task.DetectionTime.Nanoseconds()) / 1000.0
+		
+		// Calculate total time from detection to ban completion
+		var totalTime time.Duration
+		if !task.DetectionStart.IsZero() {
+			totalTime = time.Since(task.DetectionStart)
+		}
+
 		if err == nil {
-			// Format detection time in microseconds
-			detectionMicros := float64(task.DetectionTime.Nanoseconds()) / 1000.0
+			// Console log immediately (fast)
+			if totalTime > 0 {
+				log.Printf("[ACL] ⚡ BAN | User %s | Detection: %.2fµs | Execution: %v | Total: %v", 
+					userID, detectionMicros, executionTime, totalTime)
+			} else {
+				log.Printf("[ACL] ⚡ BAN | User %s | Detection: %.2fµs | Execution: %v", 
+					userID, detectionMicros, executionTime)
+			}
 
-			// Log AFTER ban completes
-			log.Printf("[ACL] ✅ BAN SUCCESS | User %s | Detection: %.2fµs | Execution: %v", userID, detectionMicros, executionTime)
-
-			PushLogEntry(LogEntry{
+			// Push to async Discord logger (non-blocking)
+			go PushLogEntry(LogEntry{
 				Message:       fmt.Sprintf("Banned user %s after detecting 1 violation", userID),
 				Level:         "critical",
 				GuildID:       guildID,
@@ -118,14 +133,16 @@ func executePunishment(task PunishTask) {
 
 	case "KICK":
 		err = discordSession.GuildMemberDeleteWithReason(guildID, userID, task.Reason)
+		executionTime := time.Since(start)
 		if err == nil {
-			PushLogEntry(LogEntry{
+			log.Printf("[ACL] ✅ KICK | User %s | Execution: %v", userID, executionTime)
+			go PushLogEntry(LogEntry{
 				Message: fmt.Sprintf("Kicked user %s", userID),
 				Level:   "error",
 				GuildID: guildID,
 				UserID:  userID,
 				Action:  "KICK",
-				Latency: time.Since(start),
+				Latency: executionTime,
 			})
 		}
 
@@ -133,31 +150,41 @@ func executePunishment(task PunishTask) {
 		// Timeout for 5 minutes
 		timeout := time.Now().Add(5 * time.Minute)
 		err = discordSession.GuildMemberTimeout(guildID, userID, &timeout)
+		executionTime := time.Since(start)
 		if err == nil {
-			PushLogEntry(LogEntry{
+			log.Printf("[ACL] ✅ TIMEOUT | User %s | Execution: %v", userID, executionTime)
+			go PushLogEntry(LogEntry{
 				Message: fmt.Sprintf("Timed out user %s for 5 minutes", userID),
 				Level:   "warn",
 				GuildID: guildID,
 				UserID:  userID,
 				Action:  "TIMEOUT",
-				Latency: time.Since(start),
+				Latency: executionTime,
 			})
 		}
 
 	case "QUARANTINE":
-		// Remove all roles from the user
+		// Remove all roles from the user concurrently
 		member, err := discordSession.GuildMember(guildID, userID)
 		if err == nil {
+			var wg sync.WaitGroup
 			for _, roleID := range member.Roles {
-				discordSession.GuildMemberRoleRemove(guildID, userID, roleID)
+				wg.Add(1)
+				go func(rID string) {
+					defer wg.Done()
+					discordSession.GuildMemberRoleRemove(guildID, userID, rID)
+				}(roleID)
 			}
-			PushLogEntry(LogEntry{
+			wg.Wait()
+			executionTime := time.Since(start)
+			log.Printf("[ACL] ✅ QUARANTINE | User %s | Execution: %v", userID, executionTime)
+			go PushLogEntry(LogEntry{
 				Message: fmt.Sprintf("Quarantined user %s (removed all roles)", userID),
 				Level:   "warn",
 				GuildID: guildID,
 				UserID:  userID,
 				Action:  "QUARANTINE",
-				Latency: time.Since(start),
+				Latency: executionTime,
 			})
 		}
 
@@ -168,7 +195,7 @@ func executePunishment(task PunishTask) {
 
 	if err != nil {
 		log.Printf("[ACL] Failed to execute %s on user %d: %v", task.Type, task.UserID, err)
-		PushLogEntry(LogEntry{
+		go PushLogEntry(LogEntry{
 			Message: fmt.Sprintf("Failed to %s user %s: %v", task.Type, userID, err),
 			Level:   "error",
 			GuildID: guildID,

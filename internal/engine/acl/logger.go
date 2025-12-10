@@ -16,8 +16,8 @@ var (
 	discordSess    *discordgo.Session
 	logChannels    = make(map[string]string) // guildID -> channelID mapping
 	logChannelLock sync.RWMutex
-	batchInterval  = 100 * time.Millisecond
-	batchSize      = 10
+	batchInterval  = 50 * time.Millisecond // Reduced from 100ms for faster Discord delivery
+	batchSize      = 5                     // Reduced from 10 for faster single-event delivery
 )
 
 // LogEntry represents a single log entry

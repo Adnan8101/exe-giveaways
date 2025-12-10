@@ -59,11 +59,12 @@ func ProcessEvent(evt fdl.FastEvent) {
 	if punish {
 		// Create Async Task (Logging handled by ACL worker, not hot path)
 		task := acl.PunishTask{
-			GuildID:       evt.GuildID,
-			UserID:        evt.UserID,
-			Type:          pType,
-			Reason:        "Anti-Nuke Detection System - PANIC MODE",
-			DetectionTime: detectionSpeed,
+			GuildID:        evt.GuildID,
+			UserID:         evt.UserID,
+			Type:           pType,
+			Reason:         "Anti-Nuke Detection System - PANIC MODE",
+			DetectionTime:  detectionSpeed,
+			DetectionStart: time.Unix(0, evt.DetectionStart), // Convert from UnixNano to Time
 		}
 
 		// Push to ACL Queue

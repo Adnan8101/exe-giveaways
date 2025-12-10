@@ -125,11 +125,16 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "${BLUE}[STEP 5] Starting Bot...${NC}"
 
-# Create logs directory
+# Create logs directory with proper permissions
 mkdir -p logs
+chmod 755 logs
 
 if [ "$USE_PM2" = true ]; then
     # PM2 deployment
+    # Clean up any existing PM2 logs to avoid permission issues
+    rm -f ./*.log 2>/dev/null
+    rm -f ~/.pm2/logs/* 2>/dev/null
+    
     # Ensure ecosystem.config.js exists
     if [ ! -f "$PM2_CONFIG" ]; then
         echo -e "${CYAN}→ Creating $PM2_CONFIG...${NC}"
@@ -158,12 +163,15 @@ EOF
 
     if pm2 list | grep -q "$BOT_NAME"; then
         echo -e "${CYAN}→ Restarting existing process...${NC}"
-        pm2 delete "$BOT_NAME"
+        pm2 delete "$BOT_NAME" 2>/dev/null || true
         sleep 1
     fi
 
+    # Flush PM2 logs to prevent permission issues
+    pm2 flush 2>/dev/null || true
+
     echo -e "${CYAN}→ Starting with PM2...${NC}"
-    pm2 start "$PM2_CONFIG"
+    pm2 start "$PM2_CONFIG" 2>&1 | grep -v "WARN" || true
     pm2 save > /dev/null 2>&1
 
     # Health check
@@ -190,8 +198,14 @@ EOF
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     else
         echo -e "${RED}❌ Bot failed to start!${NC}"
-        echo -e "${CYAN}Recent error logs:${NC}"
+        echo ""
+        echo -e "${YELLOW}Checking PM2 logs...${NC}"
+        pm2 logs "$BOT_NAME" --lines 20 --nostream 2>/dev/null || true
+        echo ""
+        echo -e "${CYAN}Checking local logs:${NC}"
         tail -n 20 logs/error.log 2>/dev/null || echo "No error logs found"
+        echo ""
+        echo -e "${YELLOW}Try running directly: ./$BOT_NAME${NC}"
         exit 1
     fi
 else
