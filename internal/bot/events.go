@@ -58,6 +58,11 @@ func (b *Bot) GuildCreate(s *discordgo.Session, g *discordgo.GuildCreate) {
 }
 
 func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	start := time.Now()
+	defer func() {
+		b.PerfMonitor.TrackCommand(time.Since(start))
+	}()
+
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
 		switch i.ApplicationCommandData().Name {

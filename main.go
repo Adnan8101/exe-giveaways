@@ -119,32 +119,27 @@ func main() {
 
 	// Hook into DiscordGo events for the Fast Path
 	// Note: We use the Session from the bot to add a raw handler equivalent
+	// Fast Handlers for AntiNuke Engine
 	b.Session.AddHandler(func(s *discordgo.Session, e *discordgo.Event) {
-		// FAST PATH: Feed the Ring Buffer
-		// e.RawData contains the JSON of the inner data 'd' or the full event?
-		// discordgo.Event.RawData is usually the full message or the data part.
-		// Use ParseFrame on the RawData.
+		start := time.Now()
 
-		// If RawData is empty (some events), skip
+		// FAST PATH: Feed the Ring Buffer
 		if len(e.RawData) == 0 {
 			return
 		}
-
-		// Parse (Zero Alloc-ish)
 		fastEvt, err := fdl.ParseFrame(e.RawData)
 		if err != nil {
-			// Malformed or irrelevant event
-			return
+			return // Malformed or irrelevant event
 		}
-
 		if fastEvt != nil {
-			// Push to Ring (Non-blocking usually, but returns false if full)
-			// If full, we increment dropped counter
 			if !eventRing.Push(fastEvt) {
-				fdl.EventsDropped.Inc(0)
+				fdl.EventsDropped.Inc(0) // Increment dropped counter if buffer is full
 			} else {
-				fdl.EventsProcessed.Inc(fastEvt.UserID) // tentative count
+				fdl.EventsProcessed.Inc(fastEvt.UserID) // Tentative count
 			}
 		}
+
+		// Track high-res latency in PerfMonitor
+		b.GetPerfMonitor().TrackEvent(time.Since(start))
 	})
 }

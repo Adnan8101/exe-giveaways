@@ -57,10 +57,6 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 		MaxConnsPerHost:       200,
 		ResponseHeaderTimeout: 10 * time.Second,
 	}
-	s.Client = &http.Client{
-		Transport: tr,
-		Timeout:   30 * time.Second,
-	}
 
 	s.Identify.Intents = discordgo.IntentsGuilds |
 		discordgo.IntentsGuildMessages |
@@ -75,6 +71,17 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 
 	// CRITICAL: Low-latency WebSocket configuration for Singapore gateway
 	s.Identify.Compress = false // Disable compression for 10-15ms lower latency
+
+	// Initialize Monitor first
+	perfMonitor := NewPerformanceMonitor()
+
+	s.Client = &http.Client{
+		Transport: &PerfTransport{
+			Base:    tr,
+			Monitor: perfMonitor,
+		},
+		Timeout: 30 * time.Second,
+	}
 
 	// CRITICAL: Minimal state tracking for lowest overhead
 	// Only track what's essential for commands to work
@@ -114,7 +121,7 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 		VoiceSessions:     make(map[string]time.Time),
 		StartTime:         time.Now(),
 		Logger:            logger,
-		PerfMonitor:       NewPerformanceMonitor(), // Initialize performance monitor
+		PerfMonitor:       perfMonitor, // Use initialized monitor
 	}
 
 	// Register handlers - consolidated for maximum performance
