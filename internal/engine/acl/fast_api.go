@@ -28,9 +28,9 @@ var (
 	}
 
 	// Dedicated HTTP client for bans (bypasses session overhead)
-	dedicatedBanClient *http.Client
+	dedicatedBanClient  *http.Client
 	dedicatedClientOnce sync.Once
-	
+
 	// Pre-allocated header map for requests (EXTREME SPEED)
 	authHeader = http.Header{}
 	headerOnce sync.Once
