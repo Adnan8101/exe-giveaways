@@ -5,8 +5,10 @@ import (
 )
 
 const (
-	MaxUsers  = 4_000_000 // Doubled for higher capacity
-	MaxGuilds = 200_000   // Doubled for higher capacity
+	MaxUsers  = 4 * 1024 * 1024 // Power of 2 (4M) for bitwise masking
+	MaxGuilds = 256 * 1024      // Power of 2 (256K)
+	UserMask  = MaxUsers - 1
+	GuildMask = MaxGuilds - 1
 )
 
 // UserInfo represents the state of a user for detection
@@ -76,68 +78,90 @@ var (
 	GuildArena [MaxGuilds]GuildInfo
 )
 
-// Ultra-fast hash function using xxHash-inspired mixing
-// Optimized for maximum distribution and minimal collisions
+// Ultra-fast hash function using simple bitwise operations
+// Since Snowflakes are already semi-random in lower bits and we use power-of-2 arena,
+// we can use a much simpler hash.
+//
+//go:inline
 func hashUser(id uint64) uint64 {
-	// xxHash-inspired mixing for perfect distribution
-	const prime1 uint64 = 11400714785074694791
-	const prime2 uint64 = 14029467366897019727
-	const prime3 uint64 = 1609587929392839161
-	const prime4 uint64 = 9650029242287828579
-	const prime5 uint64 = 2870177450012600261
-
-	h := id + prime5
-	h ^= h >> 33
-	h *= prime2
-	h ^= h >> 29
-	h *= prime3
-	h ^= h >> 32
-	return h
+	// Fibonacci hashing for good distribution on power-of-2 tables
+	return (id * 11400714819323198485) >> 32
 }
 
 // GetUser retrieves or creates a user info with lockless algorithm
 // Uses optimistic locking and atomic operations for zero-lock performance
+//
+//go:inline
 func GetUser(id uint64) *UserInfo {
-	idx := hashUser(id) % MaxUsers
+	// Fast path: Direct hash lookup
+	// We use the hash to index into the power-of-2 arena
+	idx := hashUser(id) & UserMask
 	ptr := &UserArena[idx]
 
-	// Atomic load of UserID
+	// Atomic load of UserID - Hot path
 	currentID := atomic.LoadUint64(&ptr.UserID)
 
+	// Case 1: Slot is empty, try to claim it
 	if currentID == 0 {
-		// Try to claim this slot atomically
 		if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) {
 			return ptr
 		}
-		// Someone else claimed it, reload
+		// CAS failed, reload
 		currentID = atomic.LoadUint64(&ptr.UserID)
 	}
 
+	// Case 2: Slot matches our user
 	if currentID == id {
 		return ptr
 	}
 
-	// Collision: Use quadratic probing for better cache performance
-	for probe := uint64(1); probe < 16; probe++ {
-		idx = (idx + probe*probe) % MaxUsers
-		ptr = &UserArena[idx]
-
-		currentID = atomic.LoadUint64(&ptr.UserID)
-
-		if currentID == 0 {
-			if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) {
-				return ptr
-			}
-			currentID = atomic.LoadUint64(&ptr.UserID)
-		}
-
-		if currentID == id {
-			return ptr
-		}
+	// Case 3: Collision - Linear probing with limited depth
+	// Unrolled for performance
+	const maxProbes = 4
+	
+	// Probe 1
+	idx = (idx + 1) & UserMask
+	ptr = &UserArena[idx]
+	currentID = atomic.LoadUint64(&ptr.UserID)
+	if currentID == id { return ptr }
+	if currentID == 0 {
+		if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) { return ptr }
+		if atomic.LoadUint64(&ptr.UserID) == id { return ptr }
 	}
 
-	// Final fallback: return original slot (LRU replacement)
-	return &UserArena[hashUser(id)%MaxUsers]
+	// Probe 2
+	idx = (idx + 1) & UserMask
+	ptr = &UserArena[idx]
+	currentID = atomic.LoadUint64(&ptr.UserID)
+	if currentID == id { return ptr }
+	if currentID == 0 {
+		if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) { return ptr }
+		if atomic.LoadUint64(&ptr.UserID) == id { return ptr }
+	}
+
+	// Probe 3
+	idx = (idx + 1) & UserMask
+	ptr = &UserArena[idx]
+	currentID = atomic.LoadUint64(&ptr.UserID)
+	if currentID == id { return ptr }
+	if currentID == 0 {
+		if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) { return ptr }
+		if atomic.LoadUint64(&ptr.UserID) == id { return ptr }
+	}
+
+	// Probe 4
+	idx = (idx + 1) & UserMask
+	ptr = &UserArena[idx]
+	currentID = atomic.LoadUint64(&ptr.UserID)
+	if currentID == id { return ptr }
+	if currentID == 0 {
+		if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) { return ptr }
+		if atomic.LoadUint64(&ptr.UserID) == id { return ptr }
+	}
+
+	// Final fallback: Overwrite the original slot (LRU-ish behavior)
+	// This is rare with 4M slots
+	return &UserArena[hashUser(id)&UserMask]
 }
 
 // Global atomic ticker for time - CPU cycle optimized

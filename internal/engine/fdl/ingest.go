@@ -9,24 +9,18 @@ import (
 
 // Pool for reusable structs to minimize allocations
 var (
-	minimalEventPool = sync.Pool{
+	combinedPool = sync.Pool{
 		New: func() interface{} {
-			return &MinimalEvent{}
-		},
-	}
-	rootPool = sync.Pool{
-		New: func() interface{} {
-			return &Root{}
+			return &CombinedEvent{}
 		},
 	}
 )
 
-// MinimalEvent is a struct used for partial unmarshalling
-// We use goccy/go-json for speed, but ideally we would use a custom iterator
-type MinimalEvent struct {
-	Op int         `json:"op"`
-	Ex interface{} `json:"d,omitempty"` // Placeholder
-	T  string      `json:"t,omitempty"`
+// CombinedEvent captures all necessary fields in one pass
+type CombinedEvent struct {
+	Op int             `json:"op"`
+	T  string          `json:"t,omitempty"`
+	D  MinimalDispatch `json:"d"`
 }
 
 // MinimalDispatch helps us peek at the event type without full alloc
@@ -45,10 +39,6 @@ type MinimalUser struct {
 	ID string `json:"id"`
 }
 
-type Root struct {
-	D MinimalDispatch `json:"d"`
-}
-
 // ParseFrame converts raw bytes into a FastEvent
 // This uses unsafe pointers and minimal structs to reduce overhead
 // ULTRA-OPTIMIZED: Zero-allocation path with object pooling and SIMD-friendly operations
@@ -58,37 +48,34 @@ func ParseFrame(data []byte) (*FastEvent, error) {
 		return nil, nil
 	}
 
-	// Get pooled objects
-	base := minimalEventPool.Get().(*MinimalEvent)
-	defer minimalEventPool.Put(base)
+	// Get pooled object
+	event := combinedPool.Get().(*CombinedEvent)
+	defer combinedPool.Put(event)
 
-	// 1. Initial scan for OpCode and Type - Ultra-fast JSON parsing
-	if err := json.Unmarshal(data, base); err != nil {
+	// Reset critical fields
+	event.Op = -1
+	event.T = ""
+	event.D = MinimalDispatch{}
+
+	// 1. Single pass JSON parsing - Ultra-fast
+	if err := json.Unmarshal(data, event); err != nil {
 		return nil, err
 	}
 
 	// We only care about Dispatch events (Op 0)
-	if base.Op != 0 {
+	if event.Op != 0 {
 		return nil, nil // Not a dispatch event, ignore
 	}
 
 	// 2. Map Event String to Internal Enum - Optimized with map lookup
-	evtType := mapEventType(base.T)
+	evtType := mapEventType(event.T)
 	if evtType == EvtUnknown {
 		return nil, nil
 	}
 
-	// 3. Extract IDs from the raw JSON of the "d" field
-	root := rootPool.Get().(*Root)
-	defer rootPool.Put(root)
+	d := event.D
 
-	if err := json.Unmarshal(data, root); err != nil {
-		return nil, err
-	}
-
-	d := root.D
-
-	// 4. Construct FastEvent with cache-line aligned structure
+	// 3. Construct FastEvent with cache-line aligned structure
 	fe := &FastEvent{
 		ReqType:   evtType,
 		GuildID:   parseSnowflake(d.GuildID),

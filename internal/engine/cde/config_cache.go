@@ -188,14 +188,12 @@ func RefreshAllConfigs(guildIDs []uint64) {
 }
 
 // hashGuild hashes guild ID to arena index
+// Optimized for power-of-2 arena size
+//
+//go:inline
 func hashGuild(id uint64) uint64 {
-	x := id
-	x ^= x >> 30
-	x *= 0xbf58476d1ce4e5b9
-	x ^= x >> 27
-	x *= 0x94d049bb133111eb
-	x ^= x >> 31
-	return x % MaxGuilds
+	// Fibonacci hashing
+	return ((id * 11400714819323198485) >> 32) & GuildMask
 }
 
 // parseSnowflake converts string snowflake to uint64

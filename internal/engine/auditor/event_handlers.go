@@ -45,64 +45,58 @@ func (h *EventHandlers) RegisterAll() {
 // This reduces detection latency from ~200ms (HTTP RTT) to sub-1µs (internal processing)
 func (h *EventHandlers) OnGuildAuditLogEntryCreate(s *discordgo.Session, e *discordgo.GuildAuditLogEntryCreate) {
 	// CRITICAL: Single time.Now() call for both timestamp and detection start
+	// We use a monotonic clock source if possible, but time.Now() is acceptable for now
 	startNano := time.Now().UnixNano()
 
 	// 1. Identify Event Type & Map to FDL Event (branchless optimization via lookup table)
+	// We use a direct mapping where possible
 	var reqType uint8
 
+	// Optimized switch with most common events first
 	switch *e.ActionType {
-	case discordgo.AuditLogActionChannelCreate:
-		reqType = fdl.EvtChannelCreate
-	case discordgo.AuditLogActionChannelDelete:
-		reqType = fdl.EvtChannelDelete
-	case discordgo.AuditLogActionChannelUpdate:
-		reqType = fdl.EvtChannelUpdate
-	case discordgo.AuditLogActionRoleCreate:
-		reqType = fdl.EvtRoleCreate
-	case discordgo.AuditLogActionRoleDelete:
-		reqType = fdl.EvtRoleDelete
-	case discordgo.AuditLogActionRoleUpdate:
-		reqType = fdl.EvtRoleUpdate
 	case discordgo.AuditLogActionMemberBanAdd:
 		reqType = fdl.EvtGuildBanAdd
 	case discordgo.AuditLogActionMemberKick:
 		reqType = fdl.EvtGuildMemberRemove
+	case discordgo.AuditLogActionChannelDelete:
+		reqType = fdl.EvtChannelDelete
+	case discordgo.AuditLogActionRoleDelete:
+		reqType = fdl.EvtRoleDelete
 	case discordgo.AuditLogActionWebhookCreate:
 		reqType = fdl.EvtWebhookCreate
+	case discordgo.AuditLogActionChannelCreate:
+		reqType = fdl.EvtChannelCreate
+	case discordgo.AuditLogActionRoleCreate:
+		reqType = fdl.EvtRoleCreate
+	case discordgo.AuditLogActionChannelUpdate:
+		reqType = fdl.EvtChannelUpdate
+	case discordgo.AuditLogActionRoleUpdate:
+		reqType = fdl.EvtRoleUpdate
 	case discordgo.AuditLogActionGuildUpdate:
 		reqType = fdl.EvtGuildUpdate
 	default:
-		// Ignore non-security events
+		// Ignore non-security events early
 		return
 	}
 
 	// 2. Extract Actors (Zero Allocation - inline parsing)
-	guildID := parseSnowflake(e.GuildID)
-	userID := parseSnowflake(e.UserID)
-	targetID := parseSnowflake(e.TargetID)
-
+	// Use the optimized parser from FDL
+	// Note: e.GuildID etc are strings.
+	
 	// 3. Create FastEvent on stack (zero heap allocation)
+	// We pass the address of this stack object to Push, which copies it to the ring buffer
 	evt := fdl.FastEvent{
 		ReqType:        reqType,
-		GuildID:        guildID,
-		UserID:         userID,
-		EntityID:       targetID,
+		GuildID:        fdl.ParseSnowflakeString(e.GuildID),
+		UserID:         fdl.ParseSnowflakeString(e.UserID),
+		EntityID:       fdl.ParseSnowflakeString(e.TargetID),
 		Timestamp:      startNano,
 		DetectionStart: startNano,
 	}
 
-	// 4. Push to Ring Buffer (Lock-free / High Perf) - pass pointer for zero-copy
+	// 4. Push to Ring Buffer (Lock-free / High Perf)
+	// Inlined Push logic would be faster but we use the method for safety
 	if !h.eventRing.Push(&evt) {
 		fdl.EventsDropped.Inc(0)
-		// Only log if we are dropping events to avoid IO in hot path
-		// log.Printf("[ANTINUKE] ❌ Ring buffer full, event dropped!")
-	} else {
-		// Log success only if needed, or use metrics
-		fdl.EventsProcessed.Inc(userID)
-
-		// In extreme high performance mode, we might even skip this log or make it async
-		// For now, valid to keep to PROVE speed to user
-		// latency := time.Since(start)
-		// log.Printf("[ANTINUKE] ⚡ FAST DETECT | Action: %d | User: %d | Latency: %v", *e.ActionType, userID, latency)
 	}
 }

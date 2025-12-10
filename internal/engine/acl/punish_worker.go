@@ -153,12 +153,12 @@ func punishmentWorker(id int) {
 
 // executeFastBan performs an optimized ban with minimal overhead
 // Uses direct HTTP client access for maximum speed, bypassing discordgo overhead
-func executeFastBan(guildID, userID, reason string) error {
+func executeFastBan(guildID, userID uint64, reason string) error {
 	// Use ultra-fast direct API call (bypasses discordgo overhead)
 	err := FastBanRequest(guildID, userID, reason)
 	if err != nil {
 		// Fallback to standard discordgo method if fast path fails
-		return discordSession.GuildBanCreateWithReason(guildID, userID, reason, 0)
+		return discordSession.GuildBanCreateWithReason(uitoaPooled(guildID), uitoaPooled(userID), reason, 0)
 	}
 	return nil
 }
@@ -185,7 +185,7 @@ func executePunishment(task PunishTask) {
 	case "BAN":
 		// ULTRA-FAST BAN EXECUTION
 		// Use direct API call with minimal overhead
-		err = executeFastBan(guildID, userID, task.Reason)
+		err = executeFastBan(task.GuildID, task.UserID, task.Reason)
 		executionTime := time.Since(start)
 
 		// Format detection time in microseconds

@@ -68,10 +68,12 @@ func (c *Consumer) Start() {
 				runtime.Gosched()
 				continue
 			} else {
-				// Phase 3: Brief sleep to reduce CPU usage when idle
+				// Phase 3: PAUSE instruction (if available) or minimal yield
+				// Sleep is too slow (microseconds), we want nanoseconds
+				// Just yield processor
 				emptyLoops++
-				if emptyLoops > 100 {
-					time.Sleep(50 * time.Nanosecond) // Minimal sleep
+				if emptyLoops > 1000 {
+					runtime.Gosched()
 					emptyLoops = 0
 				}
 				spinCounter = 0
