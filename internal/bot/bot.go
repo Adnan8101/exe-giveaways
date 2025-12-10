@@ -49,27 +49,41 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 	// EXTREME ULTRA-OPTIMIZED: Target sub-300ms ban execution
 	// Maximum connection pooling and minimum timeouts
 
-	// Custom DNS resolver with caching
+	// Custom dialer with TCP optimizations
 	dialer := &net.Dialer{
-		Timeout:   1500 * time.Millisecond, // Ultra-fast connection timeout
-		KeepAlive: 120 * time.Second,       // Extended keep-alive
+		Timeout:   1200 * time.Millisecond, // Even faster connection timeout
+		KeepAlive: 150 * time.Second,       // Extended keep-alive
+		// Enable TCP Fast Open for faster connection establishment (if supported)
+		Control: func(network, address string, c syscall.RawConn) error {
+			var err error
+			c.Control(func(fd uintptr) {
+				// Set TCP_NODELAY - disable Nagle's algorithm for minimum latency
+				err = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
+				if err != nil {
+					return
+				}
+				// Set TCP_QUICKACK for faster ACKs (Linux only, ignore errors on other OS)
+				_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, 0x0C, 1) // TCP_QUICKACK = 12
+			})
+			return err
+		},
 	}
 
 	tr := &http.Transport{
-		MaxIdleConns:        3000,               // EXTREME pool size
-		MaxIdleConnsPerHost: 1000,               // EXTREME per-host connections
-		IdleConnTimeout:     900 * time.Second,  // Keep connections alive 15 minutes
+		MaxIdleConns:        5000,               // EXTREME pool size
+		MaxIdleConnsPerHost: 2000,               // EXTREME per-host connections
+		IdleConnTimeout:     1200 * time.Second, // Keep connections alive 20 minutes
 		ForceAttemptHTTP2:   true,               // HTTP/2 multiplexing
 		DisableCompression:  true,               // Disable compression for speed
 		// TCP optimizations
 		DisableKeepAlives:     false,
-		MaxConnsPerHost:       1000,
-		ResponseHeaderTimeout: 1500 * time.Millisecond, // ULTRA aggressive timeout
-		TLSHandshakeTimeout:   1500 * time.Millisecond, // ULTRA fast TLS
-		ExpectContinueTimeout: 200 * time.Millisecond,  // Minimal wait
+		MaxConnsPerHost:       2000,
+		ResponseHeaderTimeout: 1200 * time.Millisecond, // ULTRA aggressive timeout
+		TLSHandshakeTimeout:   1200 * time.Millisecond, // ULTRA fast TLS
+		ExpectContinueTimeout: 100 * time.Millisecond,  // Minimal wait
 		// Connection pooling settings
-		WriteBufferSize: 256 * 1024, // 256KB write buffer (maximum)
-		ReadBufferSize:  256 * 1024, // 256KB read buffer (maximum)
+		WriteBufferSize: 512 * 1024, // 512KB write buffer (EXTREME)
+		ReadBufferSize:  512 * 1024, // 512KB read buffer (EXTREME)
 		// Dial settings for faster connections
 		DialContext: dialer.DialContext,
 	}
@@ -96,14 +110,14 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 			Base:    tr,
 			Monitor: perfMonitor,
 		},
-		Timeout: 3 * time.Second, // Ultra-aggressive timeout - force failures fast
+		Timeout: 2500 * time.Millisecond, // EXTREME aggressive timeout
 	}
 
-	// Pre-warm connections to Discord API aggressively
-	// Create multiple concurrent warmup requests to fill the connection pool
+	// Pre-warm connections to Discord API EXTREMELY aggressively
+	// Create massive concurrent warmup requests to fill the entire connection pool
 	log.Println("🔥 Pre-warming Discord API connection pool...")
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ { // 20 concurrent warmup requests (increased from 10)
+	for i := 0; i < 50; i++ { // 50 concurrent warmup requests (EXTREME)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -116,7 +130,7 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 	// Don't wait for warmup - let it happen in background
 	go func() {
 		wg.Wait()
-		log.Println("✅ Connection pool pre-warmed with 20+ connections")
+		log.Println("✅ Connection pool pre-warmed with 50+ persistent connections")
 	}()
 
 	// CRITICAL: Minimal state tracking for lowest overhead

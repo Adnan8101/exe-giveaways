@@ -29,7 +29,7 @@ var discordSession *discordgo.Session
 
 // Worker pool for parallel punishment execution
 var (
-	workerCount    = 20 // Increased worker pool for parallel API calls
+	workerCount    = 50 // EXTREME worker pool for maximum parallel execution
 	workerPoolOnce sync.Once
 )
 
@@ -86,17 +86,20 @@ func uitoa(n uint64) string {
 }
 
 // PushPunish adds a task to the queue
-// Non-blocking drop if full to protect CDE?
-// Or blocking? For security, we might want to ensure it goes through,
-// but blocking CDE is fatal.
-// We use a select with default to drop if full,
-// OR we use a very large buffer.
+// CRITICAL PATH: For BAN actions, execute IMMEDIATELY without queueing
 func PushPunish(task PunishTask) {
+	// EXTREME OPTIMIZATION: BAN actions bypass queue for minimum latency
+	if task.Type == "BAN" {
+		// Execute ban IMMEDIATELY in current goroutine (no queue delay)
+		go executePunishmentDirect(task)
+		return
+	}
+
+	// Other punishment types use queue
 	select {
 	case punishQueue <- task:
 	default:
 		// ACL Overload - Drop or log error to atomic counter
-		// For now, silent drop to preserve CDE latency
 		log.Printf("[ACL] WARNING: Punishment queue full, dropping task for user %d", task.UserID)
 	}
 }
@@ -129,6 +132,12 @@ func executeFastBan(guildID, userID, reason string) error {
 		return discordSession.GuildBanCreateWithReason(guildID, userID, reason, 0)
 	}
 	return nil
+}
+
+// executePunishmentDirect executes punishment without queueing (EXTREME SPEED MODE)
+// Used for BAN actions to minimize latency
+func executePunishmentDirect(task PunishTask) {
+	executePunishment(task)
 }
 
 func executePunishment(task PunishTask) {

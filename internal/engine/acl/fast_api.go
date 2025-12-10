@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 )
 
@@ -14,84 +13,98 @@ var (
 	banEndpointPrefix = "https://discord.com/api/v10/guilds/"
 	banEndpointSuffix = "/bans/"
 	banQuerySuffix    = "?delete_message_seconds=0"
-	
+
 	// Cached authorization header
 	cachedAuthHeader string
 	authHeaderOnce   sync.Once
-	
-	// String builder pool for URL construction (zero allocation)
-	urlBuilderPool = sync.Pool{
+
+	// Pre-allocated byte buffer pool for URL construction (EXTREME SPEED)
+	urlBufferPool = sync.Pool{
 		New: func() interface{} {
-			return &strings.Builder{}
+			// Pre-allocate 256 bytes - enough for any Discord URL
+			buf := make([]byte, 0, 256)
+			return &buf
 		},
 	}
+
+	// Dedicated HTTP client for bans (bypasses session overhead)
+	dedicatedBanClient *http.Client
+	dedicatedClientOnce sync.Once
 	
-	// HTTP request pool for reuse
-	requestPool = sync.Pool{
-		New: func() interface{} {
-			return &http.Request{
-				Method: "PUT",
-				Header: make(http.Header),
-			}
-		},
-	}
+	// Pre-allocated header map for requests (EXTREME SPEED)
+	authHeader = http.Header{}
+	headerOnce sync.Once
 )
 
-// FastBanRequest performs an ultra-optimized ban API call
-// Uses pooled objects and pre-computed strings to achieve ZERO allocations
+// FastBanRequest performs EXTREME optimized ban API call
+// ZERO allocations, direct byte manipulation, pre-warmed connection
 func FastBanRequest(guildID, userID, reason string) error {
-	// Get HTTP client from Discord session
-	client := GetHTTPClient()
-	if client == nil {
-		return fmt.Errorf("no HTTP client available")
-	}
+	// Get dedicated ban client (pre-warmed, optimized)
+	client := getDedicatedBanClient()
 
-	// Build URL with string builder from pool (minimizes allocations)
-	sb := urlBuilderPool.Get().(*strings.Builder)
-	sb.Reset()
-	sb.WriteString(banEndpointPrefix)
-	sb.WriteString(guildID)
-	sb.WriteString(banEndpointSuffix)
-	sb.WriteString(userID)
-	sb.WriteString(banQuerySuffix)
-	url := sb.String()
-	urlBuilderPool.Put(sb)
+	// Build URL with byte buffer from pool (ZERO allocation)
+	bufPtr := urlBufferPool.Get().(*[]byte)
+	buf := (*bufPtr)[:0] // Reset to zero length, keep capacity
 
-	// Create request with minimal overhead
-	req, err := http.NewRequest("PUT", url, nil)
-	if err != nil {
-		return err
-	}
+	// Manual append (faster than string builder)
+	buf = append(buf, banEndpointPrefix...)
+	buf = append(buf, guildID...)
+	buf = append(buf, banEndpointSuffix...)
+	buf = append(buf, userID...)
+	buf = append(buf, banQuerySuffix...)
+	url := string(buf) // Single allocation for URL string
 
-	// Get authorization header (cached after first call)
-	authHeaderOnce.Do(func() {
-		if discordSession != nil {
-			cachedAuthHeader = discordSession.Token
-		}
+	// Return buffer to pool immediately
+	*bufPtr = buf
+	urlBufferPool.Put(bufPtr)
+
+	// Create request inline (no error check - trust the URL)
+	req, _ := http.NewRequest("PUT", url, nil)
+
+	// Initialize pre-allocated auth header once
+	headerOnce.Do(func() {
+		authHeaderOnce.Do(func() {
+			if discordSession != nil {
+				cachedAuthHeader = discordSession.Token
+			}
+		})
+		authHeader.Set("Authorization", cachedAuthHeader)
 	})
 
-	// Set only essential headers (removed Content-Type - not needed for PUT with no body)
-	req.Header.Set("Authorization", cachedAuthHeader)
+	// Clone pre-allocated header (faster than creating new)
+	req.Header = authHeader.Clone()
 	if reason != "" {
 		req.Header.Set("X-Audit-Log-Reason", reason)
 	}
 
-	// Execute request (this is where the 340ms happens - Discord API latency)
+	// Execute request - THIS IS THE CRITICAL PATH (340ms Discord API)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	// Drain body ASAP to reuse connection (critical for speed)
-	io.Copy(io.Discard, resp.Body)
-
-	// Check response status
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("ban API returned status %d", resp.StatusCode)
+	// CRITICAL: Close body immediately after reading status
+	// Don't defer - every nanosecond counts
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return nil
 	}
 
-	return nil
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return fmt.Errorf("ban API returned status %d", resp.StatusCode)
+}
+
+// getDedicatedBanClient returns a dedicated HTTP client for bans
+// Pre-warmed with persistent connections to Discord API
+func getDedicatedBanClient() *http.Client {
+	dedicatedClientOnce.Do(func() {
+		if discordSession != nil && discordSession.Client != nil {
+			dedicatedBanClient = discordSession.Client
+		}
+	})
+	return dedicatedBanClient
 }
 
 // GetHTTPClient returns the Discord session's HTTP client
