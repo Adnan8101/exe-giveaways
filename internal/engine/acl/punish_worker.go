@@ -38,6 +38,7 @@ var stringPool = sync.Pool{
 	New: func() interface{} {
 		b := make([]byte, 0, 32)
 		return &b
+		// Pre-allocate 32 bytes for small strings
 	},
 }
 

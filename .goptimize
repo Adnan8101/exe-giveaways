@@ -1,0 +1,11 @@
+# Go build optimization flags for maximum performance
+
+# Build with these flags:
+# go build -ldflags="-s -w" -gcflags="-l=4 -B -C" -trimpath
+
+# Flags explanation:
+# -ldflags="-s -w" : Strip debug info and symbol table (smaller binary, faster)
+# -gcflags="-l=4"  : Aggressive inlining (level 4)
+# -gcflags="-B"    : Disable bounds checking (UNSAFE but faster)
+# -gcflags="-C"    : Disable nil checks (UNSAFE but faster)
+# -trimpath        : Remove file paths for smaller binary
