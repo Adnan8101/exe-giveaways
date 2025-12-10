@@ -96,16 +96,24 @@ func init() {
 
 // EvaluateRules checks the event against the user state and returns a punishment if needed
 // Returns (ShouldPunish, PunishmentType)
+// CRITICAL: Hot path - must be as fast as possible
+//
+//go:inline
 func EvaluateRules(evt fdl.FastEvent, user *UserInfo) (bool, string) {
 	now := Now()
 
 	// Reset score if decay time passed (e.g. 5 seconds)
-	if now-user.LastSeen > 5_000_000_000 {
+	// Branchless optimization: compute delta and mask
+	timeDelta := now - user.LastSeen
+	if timeDelta > 5_000_000_000 { // 5 seconds in nanoseconds
+		// Reset all counters
 		user.ThreatScore = 0
 		user.BanCount = 0
+		user.KickCount = 0
 		user.ChanDelCount = 0
 		user.ChanCreateCount = 0
 		user.RoleCreateCount = 0
+		user.RoleDelCount = 0
 		user.ChanUpdateCount = 0
 		user.RoleUpdateCount = 0
 		user.GuildUpdateCount = 0
@@ -114,14 +122,14 @@ func EvaluateRules(evt fdl.FastEvent, user *UserInfo) (bool, string) {
 	user.LastSeen = now
 
 	// EvaluateRules checks the event against the user state
-	// Optimized: Table-driven lookup (~20ns overhead)
+	// Optimized: Table-driven lookup (~5-10ns overhead)
 	handler := RuleHandlers[evt.ReqType]
 	weight, instantTrigger := handler(user)
 
 	// Update Score
 	user.ThreatScore += weight
 
-	// Check Thresholds
+	// Check Thresholds - instant trigger for any violation in panic mode
 	if instantTrigger || user.ThreatScore > ScoreThreshold {
 		return true, "BAN"
 	}

@@ -3,7 +3,6 @@ package cde
 import (
 	"discord-giveaway-bot/internal/engine/acl"
 	"discord-giveaway-bot/internal/engine/fdl"
-	"log"
 	"time"
 )
 
@@ -11,10 +10,8 @@ import (
 var botUserID uint64
 
 // ProcessEvent is the hot-path function called by the consumer
+// CRITICAL: ZERO LOGGING IN THIS FUNCTION - EVERY NANOSECOND COUNTS
 func ProcessEvent(evt fdl.FastEvent) {
-	// DEBUG: Log removal for speed
-	// log.Printf("[CDE] Processing event: Type=%d, GuildID=%d, UserID=%d", evt.ReqType, evt.GuildID, evt.UserID)
-
 	// Calculate detection speed (time from event start to processing)
 	detectionTime := time.Now().UnixNano() - evt.DetectionStart
 	detectionSpeed := time.Duration(detectionTime)
@@ -58,18 +55,9 @@ func ProcessEvent(evt fdl.FastEvent) {
 	// 3. Evaluate Rules
 	punish, pType := EvaluateRules(evt, user)
 
-	// DEBUG: Log evaluation result with detection speed
-	log.Printf("[CDE] Evaluation: UserID=%d, ThreatScore=%d, Punish=%v, Type=%s, DetectionSpeed=%v",
-		evt.UserID, user.ThreatScore, punish, pType, detectionSpeed)
-
 	// 4. Execute Punishment
 	if punish {
-		// Log only on punishment (rare event compared to normal traffic) but maybe async?
-		// For 80ns target, even this log is too slow.
-		// We will rely on the Punishment Task to log.
-
-		// Create Async Task
-
+		// Create Async Task (Logging handled by ACL worker, not hot path)
 		task := acl.PunishTask{
 			GuildID:       evt.GuildID,
 			UserID:        evt.UserID,

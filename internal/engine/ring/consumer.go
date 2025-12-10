@@ -1,7 +1,6 @@
 package ring
 
 import (
-	"log"
 	"runtime"
 	"time"
 
@@ -18,29 +17,29 @@ type Consumer struct {
 // Start begins the consumer loop
 // This should be pinned to a core in main
 func (c *Consumer) Start() {
-	log.Printf("[RING-CONSUMER-%d] Started", c.ID)
+	// Pin this goroutine to an OS thread for maximum performance
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Spin-wait loop for ultra-low latency
 	for {
 		evt, ok := c.Ring.Pop()
 		if !ok {
-			// Spin-wait optimization:
-			// Instead of immediate sleep, we spin for a bit, then yield.
-			// For ultra-low latency, busy-wait is preferred if CPU allows.
-			for i := 0; i < 1000; i++ {
+			// Busy-wait optimization: spin for a bit before yielding
+			for i := 0; i < 10000; i++ {
 				evt, ok = c.Ring.Pop()
 				if ok {
-					break
+					goto process
 				}
 				runtime.Gosched()
 			}
-			if !ok {
-				// If still empty sleep tiny amount to save CPU
-				// In pure HFT this would be strictly busy wait
-				time.Sleep(1 * time.Microsecond)
-				continue
-			}
+			// After spinning, sleep briefly to save CPU
+			time.Sleep(100 * time.Nanosecond)
+			continue
 		}
 
-		log.Printf("[RING-CONSUMER-%d] ⚡ Popped event from ring buffer, passing to CDE handler", c.ID)
+	process:
+		// NO LOGGING IN HOT PATH - Direct handler call
 		c.Handler(evt)
 	}
 }

@@ -45,17 +45,22 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 	}
 
 	// Configure HTTP/2 keep-alive pooled transport for REST API
-	// This reduces REST latency from 400-600ms to 60-120ms
+	// ULTRA-OPTIMIZED: Target <100ms ban execution
 	tr := &http.Transport{
-		MaxIdleConns:        200,
-		MaxIdleConnsPerHost: 200,
-		IdleConnTimeout:     90 * time.Second,
-		ForceAttemptHTTP2:   true,
-		DisableCompression:  false,
+		MaxIdleConns:        500,  // Increased from 200
+		MaxIdleConnsPerHost: 100,  // Per-host connections
+		IdleConnTimeout:     120 * time.Second,
+		ForceAttemptHTTP2:   true, // HTTP/2 multiplexing
+		DisableCompression:  true, // Disable compression for speed (trade bandwidth for latency)
 		// TCP optimizations
 		DisableKeepAlives:     false,
-		MaxConnsPerHost:       200,
-		ResponseHeaderTimeout: 10 * time.Second,
+		MaxConnsPerHost:       100,
+		ResponseHeaderTimeout: 5 * time.Second,  // Reduced from 10s
+		TLSHandshakeTimeout:   5 * time.Second,  // Fast TLS handshake
+		ExpectContinueTimeout: 1 * time.Second,
+		// Connection pooling settings
+		WriteBufferSize: 32 * 1024, // 32KB write buffer
+		ReadBufferSize:  32 * 1024, // 32KB read buffer
 	}
 
 	s.Identify.Intents = discordgo.IntentsGuilds |
@@ -80,7 +85,7 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 			Base:    tr,
 			Monitor: perfMonitor,
 		},
-		Timeout: 30 * time.Second,
+		Timeout: 15 * time.Second, // Reduced from 30s for faster failures
 	}
 
 	// CRITICAL: Minimal state tracking for lowest overhead

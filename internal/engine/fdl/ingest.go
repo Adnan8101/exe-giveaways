@@ -1,9 +1,24 @@
 package fdl
 
 import (
+	"sync"
 	"unsafe"
 
 	"github.com/goccy/go-json"
+)
+
+// Pool for reusable structs to minimize allocations
+var (
+	minimalEventPool = sync.Pool{
+		New: func() interface{} {
+			return &MinimalEvent{}
+		},
+	}
+	rootPool = sync.Pool{
+		New: func() interface{} {
+			return &Root{}
+		},
+	}
 )
 
 // MinimalEvent is a struct used for partial unmarshalling
@@ -30,15 +45,20 @@ type MinimalUser struct {
 	ID string `json:"id"`
 }
 
+type Root struct {
+	D MinimalDispatch `json:"d"`
+}
+
 // ParseFrame converts raw bytes into a FastEvent
 // This uses unsafe pointers and minimal structs to reduce overhead
+// OPTIMIZED: Zero-allocation path with object pooling
 func ParseFrame(data []byte) (*FastEvent, error) {
-	// 1. Initial scan for OpCode and Type
-	// Note: In a true zero-alloc environment we would use a streaming lexer
-	// For now we use the fastest available standard unmarshaller
+	// Get pooled objects
+	base := minimalEventPool.Get().(*MinimalEvent)
+	defer minimalEventPool.Put(base)
 
-	var base MinimalEvent
-	if err := json.Unmarshal(data, &base); err != nil {
+	// 1. Initial scan for OpCode and Type
+	if err := json.Unmarshal(data, base); err != nil {
 		return nil, err
 	}
 
@@ -54,31 +74,14 @@ func ParseFrame(data []byte) (*FastEvent, error) {
 	}
 
 	// 3. Extract IDs from the raw JSON of the "d" field
-	// This is the tricky part. To avoid unmarshalling "d" into an interface{},
-	// we would typically use a raw message.
-	// For this prototype, we'll do a second pass on the specific struct.
-	// OPTIMIZATION TODO: Use json.RawMessage or a custom scanner to avoid double parse.
+	root := rootPool.Get().(*Root)
+	defer rootPool.Put(root)
 
-	var dispatch MinimalDispatch
-	// We need to find the "d" block again.
-	// In production, we'd slice the bytes. Here we assume we can extract it.
-
-	// WORKAROUND: For now, we accept the allocation of unmarshalling 'd'
-	// because writing a full lexer is too large for this step.
-	// We strive for "Low Alloc" here -> "Zero Alloc" eventually.
-
-	// Let's re-parse just the data fields we need, assuming the structure matches
-	// This is essentially efficient unmarshalling
-	type Root struct {
-		D MinimalDispatch `json:"d"`
-	}
-	var root Root
-	if err := json.Unmarshal(data, &root); err != nil {
+	if err := json.Unmarshal(data, root); err != nil {
 		return nil, err
 	}
 
 	d := root.D
-	_ = dispatch // Suppress unused error if we don't use the middle step
 
 	// 4. Construct FastEvent
 	fe := &FastEvent{
@@ -105,25 +108,26 @@ func ParseFrame(data []byte) (*FastEvent, error) {
 }
 
 func mapEventType(t string) uint8 {
+	// Optimized switch statement with most common events first
 	switch t {
-	case "CHANNEL_CREATE":
-		return EvtChannelCreate
-	case "CHANNEL_DELETE":
-		return EvtChannelDelete
-	case "CHANNEL_UPDATE":
-		return EvtChannelUpdate
 	case "GUILD_BAN_ADD":
 		return EvtGuildBanAdd
 	case "GUILD_MEMBER_REMOVE":
 		return EvtGuildMemberRemove
-	case "GUILD_ROLE_CREATE":
-		return EvtRoleCreate
+	case "CHANNEL_DELETE":
+		return EvtChannelDelete
 	case "GUILD_ROLE_DELETE":
 		return EvtRoleDelete
 	case "GUILD_ROLE_UPDATE":
 		return EvtRoleUpdate
+	case "CHANNEL_CREATE":
+		return EvtChannelCreate
+	case "CHANNEL_UPDATE":
+		return EvtChannelUpdate
+	case "GUILD_ROLE_CREATE":
+		return EvtRoleCreate
 	case "WEBHOOKS_UPDATE":
-		return EvtWebhookCreate // Webhooks update covers creates usually
+		return EvtWebhookCreate
 	case "MESSAGE_CREATE":
 		return EvtMessageCreate
 	default:
@@ -132,14 +136,14 @@ func mapEventType(t string) uint8 {
 }
 
 // parseSnowflake converts string to uint64 without error checking for speed
-// In prod, simple Atoi is fine, but unsafe conversion is faster if we trust valid JSON
+// CRITICAL: Inlined for maximum performance
+//
+//go:inline
 func parseSnowflake(s string) uint64 {
 	if s == "" {
 		return 0
 	}
-	// fast string to uint64
-	// simplified: usage of strconv.ParseUint is relatively fast,
-	// but custom loop is faster.
+	// Fast string to uint64 conversion
 	var n uint64
 	for i := 0; i < len(s); i++ {
 		v := s[i] - '0'

@@ -10,32 +10,33 @@ const (
 )
 
 // UserInfo represents the state of a user for detection
-// It must be padded to cache line size if accessed frequently by different threads,
-// but since CDE is partitioned, packing is better for cache density.
-// Size: ~64 bytes
+// Padded to cache line (64 bytes) to prevent false sharing
 type UserInfo struct {
-	UserID       uint64
-	BanCount     uint16 // Rolling window count
-	KickCount    uint16
-	ChanDelCount uint16
-	RoleDelCount uint16
+	UserID       uint64 // 8 bytes
+	BanCount     uint16 // 2 bytes
+	KickCount    uint16 // 2 bytes
+	ChanDelCount uint16 // 2 bytes
+	RoleDelCount uint16 // 2 bytes
 
 	// Additional event counters for all tracked events
-	ChanCreateCount  uint16
-	RoleCreateCount  uint16
-	ChanUpdateCount  uint16
-	RoleUpdateCount  uint16
-	GuildUpdateCount uint16
-	WebhookCount     uint16
+	ChanCreateCount  uint16 // 2 bytes
+	RoleCreateCount  uint16 // 2 bytes
+	ChanUpdateCount  uint16 // 2 bytes
+	RoleUpdateCount  uint16 // 2 bytes
+	GuildUpdateCount uint16 // 2 bytes
+	WebhookCount     uint16 // 2 bytes
 
-	// Windows: Simple timestamps for the last N actions for complex rules
-	LastActionTS int64
+	// Windows: Simple timestamps for the last N actions
+	LastActionTS int64 // 8 bytes
 
 	// Score
-	ThreatScore int32
+	ThreatScore int32 // 4 bytes
 
 	// Expiration
-	LastSeen int64
+	LastSeen int64 // 8 bytes
+
+	// Padding to 64 bytes (current: 52 bytes, need 12 more)
+	_ [12]byte
 }
 
 // GuildInfo represents guild config and state
