@@ -96,22 +96,22 @@ func (r *RingBuffer) Pop() (fdl.FastEvent, bool) {
 func (r *RingBuffer) PopBatch(maxBatch int) ([]fdl.FastEvent, int) {
 	tail := atomic.LoadUint64(&r.tail)
 	head := atomic.LoadUint64(&r.head)
-	
+
 	available := int(head - tail)
 	if available == 0 {
 		return nil, 0
 	}
-	
+
 	count := available
 	if count > maxBatch {
 		count = maxBatch
 	}
-	
+
 	batch := make([]fdl.FastEvent, count)
 	for i := 0; i < count; i++ {
 		batch[i] = r.data[(tail+uint64(i))&IndexMask]
 	}
-	
+
 	atomic.StoreUint64(&r.tail, tail+uint64(count))
 	return batch, count
 }

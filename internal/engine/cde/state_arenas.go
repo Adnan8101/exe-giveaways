@@ -12,8 +12,8 @@ const (
 // UserInfo represents the state of a user for detection
 // Aligned to 128 bytes (2 cache lines) to prevent false sharing and enable prefetching
 type UserInfo struct {
-	UserID       uint64 // 8 bytes
-	
+	UserID uint64 // 8 bytes
+
 	// Critical counters (first cache line - hot path)
 	BanCount     uint32 // 4 bytes (atomic)
 	KickCount    uint32 // 4 bytes (atomic)
@@ -27,20 +27,20 @@ type UserInfo struct {
 	RoleUpdateCount  uint32 // 4 bytes (atomic)
 	GuildUpdateCount uint32 // 4 bytes (atomic)
 	WebhookCount     uint32 // 4 bytes (atomic)
-	
+
 	// New counters for additional events
-	EmojiCount       uint32 // 4 bytes (atomic)
-	StickerCount     uint32 // 4 bytes (atomic)
+	EmojiCount        uint32 // 4 bytes (atomic)
+	StickerCount      uint32 // 4 bytes (atomic)
 	MemberUpdateCount uint32 // 4 bytes (atomic)
-	IntegrationCount uint32 // 4 bytes (atomic)
-	AutoModCount     uint32 // 4 bytes (atomic)
-	EventCount       uint32 // 4 bytes (atomic)
-	
+	IntegrationCount  uint32 // 4 bytes (atomic)
+	AutoModCount      uint32 // 4 bytes (atomic)
+	EventCount        uint32 // 4 bytes (atomic)
+
 	// Timestamps and scores
 	LastActionTS int64 // 8 bytes (atomic)
 	ThreatScore  int64 // 8 bytes (atomic) - changed to int64 for atomic operations
 	LastSeen     int64 // 8 bytes (atomic)
-	
+
 	// Padding to 128 bytes for optimal cache line alignment
 	_ [32]byte
 }
@@ -64,7 +64,7 @@ type GuildInfo struct {
 
 	// Expanded whitelist for more trusted users
 	TrustedUsers [32]uint64
-	
+
 	// Padding to 128 bytes
 	_ [16]byte
 }
@@ -85,7 +85,7 @@ func hashUser(id uint64) uint64 {
 	const prime3 uint64 = 1609587929392839161
 	const prime4 uint64 = 9650029242287828579
 	const prime5 uint64 = 2870177450012600261
-	
+
 	h := id + prime5
 	h ^= h >> 33
 	h *= prime2
@@ -100,10 +100,10 @@ func hashUser(id uint64) uint64 {
 func GetUser(id uint64) *UserInfo {
 	idx := hashUser(id) % MaxUsers
 	ptr := &UserArena[idx]
-	
+
 	// Atomic load of UserID
 	currentID := atomic.LoadUint64(&ptr.UserID)
-	
+
 	if currentID == 0 {
 		// Try to claim this slot atomically
 		if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) {
@@ -112,30 +112,30 @@ func GetUser(id uint64) *UserInfo {
 		// Someone else claimed it, reload
 		currentID = atomic.LoadUint64(&ptr.UserID)
 	}
-	
+
 	if currentID == id {
 		return ptr
 	}
-	
+
 	// Collision: Use quadratic probing for better cache performance
 	for probe := uint64(1); probe < 16; probe++ {
 		idx = (idx + probe*probe) % MaxUsers
 		ptr = &UserArena[idx]
-		
+
 		currentID = atomic.LoadUint64(&ptr.UserID)
-		
+
 		if currentID == 0 {
 			if atomic.CompareAndSwapUint64(&ptr.UserID, 0, id) {
 				return ptr
 			}
 			currentID = atomic.LoadUint64(&ptr.UserID)
 		}
-		
+
 		if currentID == id {
 			return ptr
 		}
 	}
-	
+
 	// Final fallback: return original slot (LRU replacement)
 	return &UserArena[hashUser(id)%MaxUsers]
 }

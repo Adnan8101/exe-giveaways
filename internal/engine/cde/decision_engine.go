@@ -60,7 +60,7 @@ func ProcessEvent(evt fdl.FastEvent) {
 		// Increment detection counter
 		fdl.EventsDetected.Inc(evt.UserID)
 		fdl.PunishmentsIssued.Inc(evt.UserID)
-		
+
 		// Create Async Task (Logging handled by ACL worker, not hot path)
 		task := acl.PunishTask{
 			GuildID:        evt.GuildID,

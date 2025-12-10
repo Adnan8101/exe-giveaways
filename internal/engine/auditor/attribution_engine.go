@@ -80,7 +80,7 @@ func (a *AttributionEngine) Start() {
 // attributionWorker processes attribution in parallel
 func (a *AttributionEngine) attributionWorker(id int) {
 	batch := make([]*PendingEvent, 0, 512)
-	
+
 	for {
 		select {
 		case evt := <-a.eventsChan:

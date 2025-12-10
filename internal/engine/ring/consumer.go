@@ -11,13 +11,13 @@ import (
 // Consumer is a worker that processes events from the ring
 // Optimized for maximum CPU utilization and minimal latency
 type Consumer struct {
-	Ring         *RingBuffer
-	Handler      func(fdl.FastEvent)
-	ID           int
-	BatchSize    int  // Process events in batches for efficiency
-	SpinCount    int  // How many times to spin before yielding
-	running      uint32
-	stopChan     chan struct{}
+	Ring      *RingBuffer
+	Handler   func(fdl.FastEvent)
+	ID        int
+	BatchSize int // Process events in batches for efficiency
+	SpinCount int // How many times to spin before yielding
+	running   uint32
+	stopChan  chan struct{}
 }
 
 // NewConsumer creates an optimized consumer with default settings
@@ -26,8 +26,8 @@ func NewConsumer(ring *RingBuffer, handler func(fdl.FastEvent), id int) *Consume
 		Ring:      ring,
 		Handler:   handler,
 		ID:        id,
-		BatchSize: 128,     // Process up to 128 events per batch
-		SpinCount: 100000,  // Aggressive spinning for ultra-low latency
+		BatchSize: 128,    // Process up to 128 events per batch
+		SpinCount: 100000, // Aggressive spinning for ultra-low latency
 		stopChan:  make(chan struct{}),
 	}
 }
@@ -44,14 +44,14 @@ func (c *Consumer) Start() {
 	// Ultra-aggressive spin-wait loop for sub-microsecond latency
 	spinCounter := 0
 	emptyLoops := 0
-	
+
 	for atomic.LoadUint32(&c.running) == 1 {
 		evt, ok := c.Ring.Pop()
-		
+
 		if !ok {
 			// Empty queue - use adaptive spinning strategy
 			spinCounter++
-			
+
 			if spinCounter < c.SpinCount {
 				// Phase 1: Aggressive spin (0-100k iterations)
 				// Busy-wait for immediate response to incoming events
@@ -83,11 +83,11 @@ func (c *Consumer) Start() {
 		// Reset spin counter on successful pop
 		spinCounter = 0
 		emptyLoops = 0
-		
+
 		// NO LOGGING IN HOT PATH - Direct handler call
 		// Handler is inlined by compiler for zero-overhead function call
 		c.Handler(evt)
-		
+
 		// Try to process more events in batch for better throughput
 		// This amortizes the loop overhead across multiple events
 		for i := 1; i < c.BatchSize; i++ {
@@ -110,13 +110,13 @@ func (c *Consumer) StartBatch() {
 	for atomic.LoadUint32(&c.running) == 1 {
 		// Use batch pop for better cache efficiency
 		batch, count := c.Ring.PopBatch(c.BatchSize)
-		
+
 		if count == 0 {
 			// Empty - adaptive backoff
 			time.Sleep(10 * time.Nanosecond)
 			continue
 		}
-		
+
 		// Process entire batch with minimal overhead
 		for i := 0; i < count; i++ {
 			c.Handler(batch[i])

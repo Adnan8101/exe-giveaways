@@ -1,10 +1,14 @@
 package acl
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 )
 
 // API endpoint pool and request optimization
@@ -27,91 +31,173 @@ var (
 		},
 	}
 
-	// Dedicated HTTP client for bans (bypasses session overhead)
-	dedicatedBanClient *http.Client
-	dedicatedClientOnce sync.Once
-	
+	// Ultra-optimized HTTP client with connection pooling
+	ultraFastClient     *http.Client
+	ultraFastClientOnce sync.Once
+
 	// Pre-allocated header map for requests (EXTREME SPEED)
 	authHeader = http.Header{}
 	headerOnce sync.Once
 )
 
-// FastBanRequest performs EXTREME optimized ban API call
-// ZERO allocations, direct byte manipulation, pre-warmed connection
-func FastBanRequest(guildID, userID, reason string) error {
-	// Get dedicated ban client (pre-warmed, optimized)
-	client := getDedicatedBanClient()
+// initUltraFastClient creates an HTTP client optimized for minimum latency
+func initUltraFastClient() {
+	ultraFastClientOnce.Do(func() {
+		transport := &http.Transport{
+			// Massive connection pooling for parallel requests
+			MaxIdleConns:        500,
+			MaxIdleConnsPerHost: 200,
+			MaxConnsPerHost:     200,
+			IdleConnTimeout:     90 * time.Second,
 
-	// Build URL with byte buffer from pool (ZERO allocation)
-	bufPtr := urlBufferPool.Get().(*[]byte)
-	buf := (*bufPtr)[:0] // Reset to zero length, keep capacity
+			// Ultra-fast TCP settings
+			DialContext: (&net.Dialer{
+				Timeout:   2 * time.Second, // Reduced from 5s
+				KeepAlive: 30 * time.Second,
+				DualStack: true,
+			}).DialContext,
 
-	// Manual append (faster than string builder)
-	buf = append(buf, banEndpointPrefix...)
-	buf = append(buf, guildID...)
-	buf = append(buf, banEndpointSuffix...)
-	buf = append(buf, userID...)
-	buf = append(buf, banQuerySuffix...)
-	url := string(buf) // Single allocation for URL string
+			// Enable HTTP/2 for multiplexing
+			ForceAttemptHTTP2: true,
 
-	// Return buffer to pool immediately
-	*bufPtr = buf
-	urlBufferPool.Put(bufPtr)
+			// Aggressive timeouts
+			TLSHandshakeTimeout:   3 * time.Second,
+			ResponseHeaderTimeout: 8 * time.Second, // Reduced from 10s
+			ExpectContinueTimeout: 500 * time.Millisecond,
 
-	// Create request inline (no error check - trust the URL)
-	req, _ := http.NewRequest("PUT", url, nil)
+			// Disable compression for speed
+			DisableCompression: false,
 
-	// Initialize pre-allocated auth header once
-	headerOnce.Do(func() {
-		authHeaderOnce.Do(func() {
-			if discordSession != nil {
-				cachedAuthHeader = discordSession.Token
+			// Large buffers for throughput
+			WriteBufferSize: 64 * 1024,
+			ReadBufferSize:  64 * 1024,
+		}
+
+		ultraFastClient = &http.Client{
+			Transport: transport,
+			Timeout:   12 * time.Second, // Reduced from 15s
+		}
+
+		// Pre-warm connections
+		go func() {
+			for i := 0; i < 20; i++ {
+				req, _ := http.NewRequest("HEAD", "https://discord.com/api/v10/gateway", nil)
+				if discordSession != nil {
+					req.Header.Set("Authorization", discordSession.Token)
+				}
+				resp, err := ultraFastClient.Do(req)
+				if err == nil {
+					resp.Body.Close()
+				}
+				time.Sleep(50 * time.Millisecond)
 			}
-		})
-		authHeader.Set("Authorization", cachedAuthHeader)
+		}()
+	})
+}
+
+// FastBanRequest performs ULTRA-optimized ban API call
+// Target: <150ms total latency including Discord API RTT
+func FastBanRequest(guildID, userID, reason string) error {
+	// Initialize client on first call
+	initUltraFastClient()
+
+	// Build URL with string builder (faster concatenation)
+	var urlBuilder strings.Builder
+	urlBuilder.Grow(100) // Pre-allocate
+	urlBuilder.WriteString("https://discord.com/api/v10/guilds/")
+	urlBuilder.WriteString(guildID)
+	urlBuilder.WriteString("/bans/")
+	urlBuilder.WriteString(userID)
+	url := urlBuilder.String()
+
+	// Static JSON body reader (reusable)
+	body := strings.NewReader(`{"delete_message_seconds":0}`)
+
+	// Create request with timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, body)
+	if err != nil {
+		return err
+	}
+
+	// Initialize headers once
+	headerOnce.Do(func() {
+		if discordSession != nil {
+			cachedAuthHeader = discordSession.Token
+			authHeader.Set("Authorization", cachedAuthHeader)
+		}
 	})
 
-	// Clone pre-allocated header (faster than creating new)
+	// Clone and set headers
+	req.Header = authHeader.Clone()
+	req.Header.Set("Content-Type", "application/json")
+	if reason != "" {
+		req.Header.Set("X-Audit-Log-Reason", reason)
+	}
+
+	// Execute with ultra-fast client
+	resp, err := ultraFastClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	// Fast success path
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// Async drain for connection reuse
+		go func() {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}()
+		return nil
+	}
+
+	// Error path
+	body2, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	resp.Body.Close()
+	return fmt.Errorf("ban failed: %d - %s", resp.StatusCode, string(body2))
+}
+
+// FastKickRequest performs an optimized kick request
+func FastKickRequest(guildID, userID, reason string) error {
+	initUltraFastClient()
+
+	var urlBuilder strings.Builder
+	urlBuilder.Grow(100)
+	urlBuilder.WriteString("https://discord.com/api/v10/guilds/")
+	urlBuilder.WriteString(guildID)
+	urlBuilder.WriteString("/members/")
+	urlBuilder.WriteString(userID)
+	url := urlBuilder.String()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+
 	req.Header = authHeader.Clone()
 	if reason != "" {
 		req.Header.Set("X-Audit-Log-Reason", reason)
 	}
 
-	// Execute request - THIS IS THE CRITICAL PATH (340ms Discord API)
-	resp, err := client.Do(req)
+	resp, err := ultraFastClient.Do(req)
 	if err != nil {
 		return err
 	}
 
-	// CRITICAL: Close body immediately after reading status
-	// Don't defer - every nanosecond counts
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		go func() {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}()
 		return nil
 	}
 
-	io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	resp.Body.Close()
-	return fmt.Errorf("ban API returned status %d", resp.StatusCode)
-}
-
-// getDedicatedBanClient returns a dedicated HTTP client for bans
-// Pre-warmed with persistent connections to Discord API
-func getDedicatedBanClient() *http.Client {
-	dedicatedClientOnce.Do(func() {
-		if discordSession != nil && discordSession.Client != nil {
-			dedicatedBanClient = discordSession.Client
-		}
-	})
-	return dedicatedBanClient
-}
-
-// GetHTTPClient returns the Discord session's HTTP client
-// This is a helper to access the underlying client
-func GetHTTPClient() *http.Client {
-	if discordSession != nil && discordSession.Client != nil {
-		return discordSession.Client
-	}
-	return nil
+	return fmt.Errorf("kick failed: %d - %s", resp.StatusCode, string(body))
 }

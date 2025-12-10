@@ -115,30 +115,30 @@ func ParseFrame(data []byte) (*FastEvent, error) {
 // Perfect hash lookup table for ultra-fast event type mapping
 // Pre-computed at compile time for zero-overhead lookup
 var eventTypeMap = map[string]uint8{
-	"GUILD_BAN_ADD":               EvtGuildBanAdd,
-	"GUILD_BAN_REMOVE":            EvtGuildMemberRemove, // Anti-Unban
-	"GUILD_MEMBER_REMOVE":         EvtGuildMemberRemove,
-	"CHANNEL_DELETE":              EvtChannelDelete,
-	"CHANNEL_CREATE":              EvtChannelCreate,
-	"CHANNEL_UPDATE":              EvtChannelUpdate,
-	"GUILD_ROLE_DELETE":           EvtRoleDelete,
-	"GUILD_ROLE_CREATE":           EvtRoleCreate,
-	"GUILD_ROLE_UPDATE":           EvtRoleUpdate,
-	"GUILD_UPDATE":                EvtGuildUpdate,
-	"WEBHOOKS_UPDATE":             EvtWebhookCreate,
-	"GUILD_EMOJIS_UPDATE":         EvtEmojiUpdate,
-	"GUILD_STICKERS_UPDATE":       EvtStickerUpdate,
-	"GUILD_MEMBER_UPDATE":         EvtMemberUpdate,
-	"INTEGRATION_CREATE":          EvtIntegrationCreate,
-	"INTEGRATION_UPDATE":          EvtIntegrationUpdate,
-	"INTEGRATION_DELETE":          EvtIntegrationDelete,
-	"AUTO_MODERATION_RULE_CREATE": EvtAutoModRuleCreate,
-	"AUTO_MODERATION_RULE_UPDATE": EvtAutoModRuleUpdate,
-	"AUTO_MODERATION_RULE_DELETE": EvtAutoModRuleDelete,
+	"GUILD_BAN_ADD":                EvtGuildBanAdd,
+	"GUILD_BAN_REMOVE":             EvtGuildMemberRemove, // Anti-Unban
+	"GUILD_MEMBER_REMOVE":          EvtGuildMemberRemove,
+	"CHANNEL_DELETE":               EvtChannelDelete,
+	"CHANNEL_CREATE":               EvtChannelCreate,
+	"CHANNEL_UPDATE":               EvtChannelUpdate,
+	"GUILD_ROLE_DELETE":            EvtRoleDelete,
+	"GUILD_ROLE_CREATE":            EvtRoleCreate,
+	"GUILD_ROLE_UPDATE":            EvtRoleUpdate,
+	"GUILD_UPDATE":                 EvtGuildUpdate,
+	"WEBHOOKS_UPDATE":              EvtWebhookCreate,
+	"GUILD_EMOJIS_UPDATE":          EvtEmojiUpdate,
+	"GUILD_STICKERS_UPDATE":        EvtStickerUpdate,
+	"GUILD_MEMBER_UPDATE":          EvtMemberUpdate,
+	"INTEGRATION_CREATE":           EvtIntegrationCreate,
+	"INTEGRATION_UPDATE":           EvtIntegrationUpdate,
+	"INTEGRATION_DELETE":           EvtIntegrationDelete,
+	"AUTO_MODERATION_RULE_CREATE":  EvtAutoModRuleCreate,
+	"AUTO_MODERATION_RULE_UPDATE":  EvtAutoModRuleUpdate,
+	"AUTO_MODERATION_RULE_DELETE":  EvtAutoModRuleDelete,
 	"GUILD_SCHEDULED_EVENT_CREATE": EvtGuildEventCreate,
 	"GUILD_SCHEDULED_EVENT_UPDATE": EvtGuildEventUpdate,
 	"GUILD_SCHEDULED_EVENT_DELETE": EvtGuildEventDelete,
-	"MESSAGE_CREATE":              EvtMessageCreate,
+	"MESSAGE_CREATE":               EvtMessageCreate,
 }
 
 func mapEventType(t string) uint8 {
@@ -159,7 +159,7 @@ func parseSnowflake(s string) uint64 {
 	}
 	// Ultra-fast string to uint64 conversion with unrolled loop
 	var n uint64
-	
+
 	// Process 8 bytes at a time for SIMD optimization potential
 	length := len(s)
 	for i := 0; i < length; i++ {

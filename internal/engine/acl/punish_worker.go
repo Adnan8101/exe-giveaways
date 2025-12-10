@@ -116,20 +116,20 @@ func PushPunish(task PunishTask) {
 func StartPunishWorker() {
 	workerPoolOnce.Do(func() {
 		log.Printf("[ACL] Starting %d punishment workers...", workerCount)
-		
+
 		// Start dedicated fast ban workers (75% of pool for ban priority)
 		fastWorkerCount := (workerCount * 3) / 4
 		for i := 0; i < fastWorkerCount; i++ {
 			go fastBanWorker(i)
 		}
-		
+
 		// Start standard workers for other punishment types
 		standardWorkerCount := workerCount - fastWorkerCount
 		for i := 0; i < standardWorkerCount; i++ {
 			go punishmentWorker(i + fastWorkerCount)
 		}
-		
-		log.Printf("[ACL] ✅ All %d workers ready (%d fast-ban, %d standard)", 
+
+		log.Printf("[ACL] ✅ All %d workers ready (%d fast-ban, %d standard)",
 			workerCount, fastWorkerCount, standardWorkerCount)
 	})
 }
@@ -138,7 +138,7 @@ func StartPunishWorker() {
 func fastBanWorker(id int) {
 	runtime.LockOSThread() // Pin to OS thread for consistent performance
 	defer runtime.UnlockOSThread()
-	
+
 	for task := range fastBanQueue {
 		executePunishment(task)
 	}

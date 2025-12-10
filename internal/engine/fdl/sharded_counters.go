@@ -20,10 +20,10 @@ type ShardedCounter struct {
 
 // Global counters for key metrics - Pre-allocated for zero overhead
 var (
-	TotalEvents     ShardedCounter
-	EventsDropped   ShardedCounter
-	EventsProcessed ShardedCounter
-	EventsDetected  ShardedCounter
+	TotalEvents       ShardedCounter
+	EventsDropped     ShardedCounter
+	EventsProcessed   ShardedCounter
+	EventsDetected    ShardedCounter
 	PunishmentsIssued ShardedCounter
 )
 

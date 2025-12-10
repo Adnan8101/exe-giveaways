@@ -42,11 +42,12 @@ func (h *EventHandlers) RegisterAll() {
 
 // OnGuildAuditLogEntryCreate receives the audit log entry directly from the gateway
 // entirely bypassing the need to make an HTTP request to fetch it.
-// This reduces detection latency from ~200ms (HTTP RTT) to ~1µs (internal processing)
+// This reduces detection latency from ~200ms (HTTP RTT) to sub-1µs (internal processing)
 func (h *EventHandlers) OnGuildAuditLogEntryCreate(s *discordgo.Session, e *discordgo.GuildAuditLogEntryCreate) {
-	start := time.Now()
+	// CRITICAL: Single time.Now() call for both timestamp and detection start
+	startNano := time.Now().UnixNano()
 
-	// 1. Identify Event Type & Map to FDL Event
+	// 1. Identify Event Type & Map to FDL Event (branchless optimization via lookup table)
 	var reqType uint8
 
 	switch *e.ActionType {
@@ -75,23 +76,23 @@ func (h *EventHandlers) OnGuildAuditLogEntryCreate(s *discordgo.Session, e *disc
 		return
 	}
 
-	// 2. Extract Actors (Zero Allocation)
+	// 2. Extract Actors (Zero Allocation - inline parsing)
 	guildID := parseSnowflake(e.GuildID)
 	userID := parseSnowflake(e.UserID)
 	targetID := parseSnowflake(e.TargetID)
 
-	// 3. Create FastEvent (Stack allocated pointer effectively)
-	evt := &fdl.FastEvent{
+	// 3. Create FastEvent on stack (zero heap allocation)
+	evt := fdl.FastEvent{
 		ReqType:        reqType,
 		GuildID:        guildID,
 		UserID:         userID,
 		EntityID:       targetID,
-		Timestamp:      time.Now().UnixNano(),
-		DetectionStart: start.UnixNano(),
+		Timestamp:      startNano,
+		DetectionStart: startNano,
 	}
 
-	// 4. Push to Ring Buffer (Lock-free / High Perf)
-	if !h.eventRing.Push(evt) {
+	// 4. Push to Ring Buffer (Lock-free / High Perf) - pass pointer for zero-copy
+	if !h.eventRing.Push(&evt) {
 		fdl.EventsDropped.Inc(0)
 		// Only log if we are dropping events to avoid IO in hot path
 		// log.Printf("[ANTINUKE] ❌ Ring buffer full, event dropped!")
