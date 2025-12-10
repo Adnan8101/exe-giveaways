@@ -11,7 +11,7 @@ type FastEvent struct {
 	DetectionStart int64  // 8 bytes: Start time for detection speed measurement
 }
 
-// Event Types (uint8)
+// Event Types (uint8) - Comprehensive coverage for all antinuke events
 const (
 	EvtUnknown uint8 = iota
 	EvtChannelCreate
@@ -21,8 +21,28 @@ const (
 	EvtRoleDelete
 	EvtRoleUpdate
 	EvtGuildBanAdd
+	EvtGuildUnban
 	EvtGuildMemberRemove // Kick/Leave
 	EvtGuildUpdate
 	EvtWebhookCreate
+	EvtWebhookUpdate
+	EvtWebhookDelete
 	EvtMessageCreate // For spam detection
+	EvtEmojiCreate
+	EvtEmojiDelete
+	EvtEmojiUpdate
+	EvtMemberUpdate
+	EvtIntegrationCreate
+	EvtIntegrationUpdate
+	EvtIntegrationDelete
+	EvtAutomodCreate
+	EvtAutomodUpdate
+	EvtAutomodDelete
+	EvtEventCreate
+	EvtEventUpdate
+	EvtEventDelete
+	EvtMemberPrune
+	EvtBotAdd
+	EvtRolePing
+	EvtEveryonePing
 )

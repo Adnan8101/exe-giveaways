@@ -97,11 +97,10 @@ func (r *RingBuffer) GetWriteSlot() *fdl.FastEvent {
 	return &r.data[head&IndexMask]
 }
 
-// Commit publishes the write slot
+// Commit publishes the write slot (advances head pointer)
+// CRITICAL: Must be called after GetWriteSlot to publish the write
+//
+//go:inline
 func (r *RingBuffer) Commit() {
-	// We assume single producer, so r.head is owned by us (mostly), but for safety we load it again?
-	// or we just atomic add?
-	// To be completely safe/correct with GetWriteSlot pattern we should probably track head locally
-	// or just atomic add.
 	atomic.AddUint64(&r.head, 1)
 }
