@@ -43,9 +43,10 @@ func (b *Bot) GuildCreate(s *discordgo.Session, g *discordgo.GuildCreate) {
 	log.Printf("Guild joined/loaded: %s (%s). Starting command registration...", g.Name, g.ID)
 
 	// Warm AntiNuke cache for this guild
-	if b.AntiNukeV2 != nil {
-		b.AntiNukeV2.WarmCache(g.ID)
-	}
+	// Warm AntiNuke cache for this guild
+	// if b.AntiNukeV2 != nil {
+	// 	b.AntiNukeV2.WarmCache(g.ID)
+	// }
 
 	// Register main bot commands
 	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, g.ID, commands.Commands)
@@ -101,7 +102,7 @@ func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 		case "performance":
 			commands.HandlePerformance(s, i, b)
 		// AntiNuke Commands
-		case "panic_mode":
+		case "panic": // Renamed from panic_mode in definition
 			antinuke.HandlePanicMode(s, i, b.DB)
 		// Voice Commands
 		case "wv":
@@ -149,9 +150,9 @@ func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			b.AdminShopCommands.CheckRedeem(s, i)
 		case "redeem-claimed":
 			b.AdminShopCommands.RedeemClaimed(s, i)
-		// AntiNuke Commands
+			// AntiNuke Commands
 		case "antinuke":
-			antinuke.HandleAntiNuke(s, i, b.DB, b.AntiNukeV2)
+			antinuke.HandleAntiNuke(s, i, b.DB)
 		case "setlimit":
 			antinuke.HandleSetLimit(s, i, b.DB)
 		case "punishment":
@@ -206,8 +207,8 @@ func (b *Bot) InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCr
 			b.AdminShopCommands.HandleEditRoleSelect(s, i)
 		} else if customID == "help_category_select" {
 			commands.HandleHelpSelect(s, i)
-		} else if strings.HasPrefix(customID, "whitelist_add_select_") {
-			antinuke.HandleWhitelistSelect(s, i, b.DB)
+			// } else if strings.HasPrefix(customID, "whitelist_add_select_") {
+			// 	antinuke.HandleWhitelistSelect(s, i, b.DB)
 		}
 
 	case discordgo.InteractionModalSubmit:

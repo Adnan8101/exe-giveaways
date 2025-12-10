@@ -10,6 +10,15 @@ import (
 	"runtime/debug"
 
 	"github.com/goccy/go-json"
+
+	// Engine Imports
+	"discord-giveaway-bot/internal/engine/acl"
+	"discord-giveaway-bot/internal/engine/cde"
+	"discord-giveaway-bot/internal/engine/fdl"
+	"discord-giveaway-bot/internal/engine/ring"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 type Config struct {
@@ -60,6 +69,43 @@ func main() {
 		log.Fatalf("Error initializing Database: %v", err)
 	}
 
+	// =========================================================================
+	// HIGH-PERFORMANCE ENGINE INITIALIZATION
+	// =========================================================================
+
+	// 1. Initialize Ring Buffer (The Highway)
+	eventRing := ring.New()
+
+	// 2. Start ACL Workers (The Async Executors)
+	acl.StartPunishWorker()
+	acl.StartLogger()
+
+	// 3. Start CDE Workers (The Brains)
+	// Pin 2-4 workers depending on core count
+	numWorkers := numCPU / 2
+	if numWorkers < 2 {
+		numWorkers = 2
+	}
+
+	for i := 0; i < numWorkers; i++ {
+		worker := ring.Consumer{
+			Ring:    eventRing,
+			ID:      i,
+			Handler: cde.ProcessEvent,
+		}
+		go worker.Start()
+	}
+
+	// 4. Start Time Ticker (1ms resolution) for zero-syscall time
+	go func() {
+		ticker := time.NewTicker(1 * time.Millisecond)
+		for range ticker.C {
+			cde.SetTime(time.Now().UnixNano())
+		}
+	}()
+
+	// =========================================================================
+
 	// Initialize bot
 	b, err := bot.New(config.Token, db, rdb)
 	if err != nil {
@@ -70,4 +116,35 @@ func main() {
 	if err := b.Start(); err != nil {
 		log.Fatalf("Error starting bot: %v", err)
 	}
+
+	// Hook into DiscordGo events for the Fast Path
+	// Note: We use the Session from the bot to add a raw handler equivalent
+	b.Session.AddHandler(func(s *discordgo.Session, e *discordgo.Event) {
+		// FAST PATH: Feed the Ring Buffer
+		// e.RawData contains the JSON of the inner data 'd' or the full event?
+		// discordgo.Event.RawData is usually the full message or the data part.
+		// Use ParseFrame on the RawData.
+
+		// If RawData is empty (some events), skip
+		if len(e.RawData) == 0 {
+			return
+		}
+
+		// Parse (Zero Alloc-ish)
+		fastEvt, err := fdl.ParseFrame(e.RawData)
+		if err != nil {
+			// Malformed or irrelevant event
+			return
+		}
+
+		if fastEvt != nil {
+			// Push to Ring (Non-blocking usually, but returns false if full)
+			// If full, we increment dropped counter
+			if !eventRing.Push(fastEvt) {
+				fdl.EventsDropped.Inc(0)
+			} else {
+				fdl.EventsProcessed.Inc(fastEvt.UserID) // tentative count
+			}
+		}
+	})
 }

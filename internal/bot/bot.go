@@ -1,7 +1,6 @@
 package bot
 
 import (
-	antinukev2 "discord-giveaway-bot/internal/antinuke-v2"
 	"discord-giveaway-bot/internal/commands"
 	"discord-giveaway-bot/internal/commands/economy"
 	"discord-giveaway-bot/internal/commands/shop"
@@ -28,7 +27,6 @@ type Bot struct {
 	Redis             *redis.Client
 	Service           *services.GiveawayService
 	EconomyService    *services.EconomyService
-	AntiNukeV2        *antinukev2.Service // NEW: V2 Service
 	EconomyEvents     *EconomyEvents
 	ShopCommands      *shop.ShopCommand
 	AdminShopCommands *shop.AdminShopCommand
@@ -100,9 +98,6 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 	blackjackCmd := economy.NewBlackjackCommand(db, economySvc)
 	economyEvents := NewEconomyEvents(economySvc, svc, db, blackjackCmd)
 
-	// Initialize AntiNuke V2 service
-	antiNukeV2 := antinukev2.New(s, db)
-
 	// Initialize logger for antinuke
 	logger, _ := zap.NewProduction()
 
@@ -112,7 +107,6 @@ func New(token string, db *database.Database, rdb *redis.Client) (*Bot, error) {
 		Redis:             rdb,
 		Service:           svc,
 		EconomyService:    economySvc,
-		AntiNukeV2:        antiNukeV2, // NEW: V2 Service
 		EconomyEvents:     economyEvents,
 		ShopCommands:      shop.NewShopCommand(db, economySvc),
 		AdminShopCommands: shop.NewAdminShopCommand(db),
@@ -173,8 +167,8 @@ func (b *Bot) Start() error {
 	log.Printf("✓ Registered %d regular commands", len(commands.Commands))
 
 	// Start AntiNuke V2 (includes cache warming and gateway event handlers)
-	log.Println("Starting AntiNuke V2...")
-	b.AntiNukeV2.Start()
+	// log.Println("Starting AntiNuke V2...")
+	// b.AntiNukeV2.Start()
 
 	log.Println("\n🚀 Bot is running!")
 	log.Println("⚡ AntiNuke V2: Real-time gateway events + lock-free detection (<0.3ms target)")

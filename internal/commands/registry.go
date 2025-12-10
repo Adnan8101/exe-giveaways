@@ -51,10 +51,10 @@ var Commands = []*discordgo.ApplicationCommand{
 	shop.Buy,
 	shop.AdminShop,
 	// AntiNuke Commands
-	antinuke.PanicModeCmd,
-	antinuke.Enable,
+	antinuke.AntiNukeCmd, // Changed name from Enable
 	antinuke.SetLimit,
 	antinuke.Punishment,
 	antinuke.Whitelist,
+	antinuke.PanicModeCmd,
 	antinuke.Logs,
 }
