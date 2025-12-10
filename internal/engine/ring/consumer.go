@@ -1,6 +1,7 @@
 package ring
 
 import (
+	"log"
 	"runtime"
 	"time"
 
@@ -17,6 +18,7 @@ type Consumer struct {
 // Start begins the consumer loop
 // This should be pinned to a core in main
 func (c *Consumer) Start() {
+	log.Printf("[RING-CONSUMER-%d] Started", c.ID)
 	for {
 		evt, ok := c.Ring.Pop()
 		if !ok {
@@ -38,6 +40,7 @@ func (c *Consumer) Start() {
 			}
 		}
 
+		log.Printf("[RING-CONSUMER-%d] ⚡ Popped event from ring buffer, passing to CDE handler", c.ID)
 		c.Handler(evt)
 	}
 }
